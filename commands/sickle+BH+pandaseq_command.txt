@@ -1,0 +1,4 @@
+#Just a log of command used. To perform the pipeline, use run_sickle+BH+pandaseq.pl instead.
+~/sickle-master/sickle pe -f 351_S351_L001_R1_001.fastq -r 351_S351_L001_R2_001.fastq -o 351_S351_L001_R1_001_trimed.fastq -p 351_S351_L001_R2_001_trimed.fastq -n -t sanger -s 351_trimed_single.fastq
+~/SPAdes-3.5.0-Linux/bin/spades.py --careful --only-error-correction -1 351_S351_L001_R1_001_trimed.fastq -2 351_S351_L001_R2_001_trimed.fastq -o 351_corrected/ --disable-gzip-output -t 12
+pandaseq -f 351_S351_L001_R1_001_trimed.fastq -r 351_S351_L001_R2_001_trimed.fastq -o 50 -l 400 -w 351_pandaseq.fasta -g 351_pandaseq.log

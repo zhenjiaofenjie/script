@@ -1,0 +1,8 @@
+set.current(processors=12)
+make.contigs(file=mock.txt,insert=25,processors=12)
+screen.seqs(fasta=mock.trim.contigs.fasta,contigsreport=mock.contigs.report,maxambig=0,minlength=400,maxn=0,minoverlap=50,processors=12,group=mock.contigs.groups)
+pcr.seqs(fasta=mock.trim.contigs.good.fasta, pdiffs=4, oligos=~/V3V4.oligo, group=mock.contigs.good.groups, processors=12, nomatch=true)
+unique.seqs(fasta=mock.trim.contigs.good.pcr.fasta)
+count.seqs(name=mock.trim.contigs.good.pcr.names,group=mock.contigs.good.pcr.groups)
+align.seqs(fasta=mock.trim.contigs.good.pcr.unique.fasta,reference=~/silva.bacteria/silva.bacteria.fasta,processors=12)
+summary.seqs(fasta=mock.trim.contigs.good.pcr.unique.align,count=mock.trim.contigs.good.pcr.count_table)

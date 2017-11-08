@@ -1,0 +1,6 @@
+#obtain bootstrap matrices
+mkdir boot
+python ~/sparcc/MakeBootstraps.py gdsr.otu.txt -o boot/boot
+parallel --gnu -j 24 ~/sparcc/SparCC.py boot/boot_{}.txt -i 100 -c boot/sim_cor_{}.txt >>sparcc.log :::: <(seq 0 99)
+~/sparcc/SparCC.py gdsr.otu.txt -i 100
+python ~/sparcc/PseudoPvals.py cor_mat_SparCC.out boot/sim_cor 100 -o pval_two_sided.txt -t "two_sided"

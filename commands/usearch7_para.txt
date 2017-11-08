@@ -1,0 +1,13 @@
+derep_fulllength.pl BOX_usearch.fasta
+~/usearch7.0.1090_i86linux32 -sortbysize BOX_usearch_uniques.fasta -output BOX_usearch_uniques_sorted.fasta -minsize 2
+~/usearch7.0.1090_i86linux32 -cluster_otus BOX_usearch_uniques_sorted.fasta -otus BOX_usearch_otus.fasta
+~/usearch7.0.1090_i86linux32 -uchime_ref BOX_usearch_otus.fasta -db ~/rdp_gold.fa -uchimeout BOX_usearch_results.uchime -strand plus -chimeras BOX_usearch_otus_chimeras.fasta
+filter_fasta.py -f BOX_usearch_otus.fasta -o BOX_usearch_otus_nonchimeras.fasta -a BOX_usearch_otus_chimeras.fasta -n
+fasta_number.py BOX_usearch_otus_nonchimeras.fasta OTU > BOX_usearch_otus_numbered.fasta
+~/usearch7.0.1090_i86linux32 -usearch_global BOX_usearch.fasta -db BOX_usearch_otus_numbered.fasta -strand plus -id 0.97 -uc BOX_usearch_readmap.uc
+python ~/.perl_program/uc2otutab.py BOX_usearch_readmap.uc > BOX_usearch_otu_table.txt
+parallel_align_seqs_pynast.py -i BOX_usearch_otus_numbered.fasta -o .
+filter_alignment.py -i BOX_usearch_otus_numbered_aligned.fasta
+make_phylogeny.py -i BOX_usearch_otus_numbered_aligned_pfiltered.fasta -o BOX_usearch_rep_set.tre
+biom convert -i BOX_usearch_otu_table.txt -o BOX_usearch_otu_table.biom --table-type 'otu table'
+biom summarize-table -i BOX_usearch_otu_table.biom -o BOX_usearch_otu_table_summary.txt

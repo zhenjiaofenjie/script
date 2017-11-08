@@ -1,0 +1,14 @@
+~/usearch8 -search_pcr GD_usearch.fasta -db ~/V3V4_ambig.fasta -strand both -ampout GD_usearch_pcrstriped.fasta -pcr_strip_primers -maxhits 2
+derep_fulllength.pl GD_usearch_pcrstriped.fasta
+~/usearch8 -sortbysize GD_usearch_pcrstriped_uniques.fasta -fastaout GD_usearch_pcrstriped_uniques_sorted.fasta -minsize 2
+~/usearch8 -cluster_otus GD_usearch_pcrstriped_uniques_sorted.fasta -otus GD_usearch_pcrstriped_otus.fasta -uparseout GD_usearch_pcrstriped_otus.log
+~/usearch8 -uchime_ref GD_usearch_pcrstriped_otus.fasta -db ~/rdp_gold.fa -uchimeout GD_usearch_pcrstriped_results.uchime -strand plus -chimeras GD_usearch_pcrstriped_otus_chimeras.fasta
+filter_fasta.py -f GD_usearch_pcrstriped_otus.fasta -o GD_usearch_pcrstriped_otus_nonchimeras.fasta -a GD_usearch_pcrstriped_otus_chimeras.fasta -n
+fasta_number.py GD_usearch_pcrstriped_otus_nonchimeras.fasta OTU > GD_usearch_pcrstriped_otus_numbered.fasta
+~/usearch8 -usearch_global GD_usearch_pcrstriped.fasta -db GD_usearch_pcrstriped_otus_numbered.fasta -strand plus -id 0.97 -uc GD_usearch_pcrstriped_readmap.uc
+python ~/.perl_program/uc2otutab.py GD_usearch_pcrstriped_readmap.uc > GD_usearch_pcrstriped_otu_table.txt
+parallel_align_seqs_pynast.py -i GD_usearch_pcrstriped_otus_numbered.fasta -o .
+filter_alignment.py -i GD_usearch_pcrstriped_otus_numbered_aligned.fasta
+make_phylogeny.py -i GD_usearch_pcrstriped_otus_numbered_aligned_pfiltered.fasta -o GD_usearch_pcrstriped_rep_set.tre
+biom convert -i GD_usearch_pcrstriped_otu_table.txt -o GD_usearch_pcrstriped_otu_table.biom --table-type 'OTU table' --to-json
+biom summarize-table -i GD_usearch_pcrstriped_otu_table.biom -o GD_usearch_pcrstriped_otu_table_summary.txt

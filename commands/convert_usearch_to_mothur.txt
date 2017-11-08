@@ -1,0 +1,2 @@
+sed -n '/^>/s/^>\(.*barcodelabel=\(.*\);\)/\1\t\2/p' mock_usearch.fasta >mock.contigs.good.groups
+mv mock_usearch.fasta mock.trim.contigs.good.fasta

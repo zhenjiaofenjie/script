@@ -1,0 +1,5 @@
+Use run_moira_all.pl to process the raw paired-end sequences. Outputs are mock_moira.fasta, mock_moira.names and mock_moira.groups. 
+Use mothur.moira.step1.txt and mothur.moira.step2.txt to further filter the sequences processed by run_moira.pl. It includes length limitation, dereplicate to uniques, align to reference, precluster, uchime chimera check, classification, remove of non-bacteria entries and rarefaction.
+The output files are filtered.fasta, filtered.count_table.
+Downstream USEARCH, mothur, QIIME etc. should use filtered_resize.fasta or filtered_resize.nogap.fasta and filterd_resize.count_table with changed "size" annotation of filtered.fasta and filtered.count_table by resize_moira_filtered.pl.
+The script mothur_moira_step3.txt is used to pick OTUs and calculate the distance between sequences.

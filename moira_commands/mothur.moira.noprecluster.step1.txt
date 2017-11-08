@@ -1,0 +1,11 @@
+set.current(processors=12)
+list.seqs(name=mock_moira.names)
+get.seqs(group=mock_moira.groups,accnos=mock_moira.accnos)
+count.seqs(name=mock_moira.names,group=mock_moira.pick.groups)
+system(~/usearch8 -search_pcr mock_moira.fasta -db ~/V3V4_ambig.fasta -strand both -ampout mock_moira_pcrstriped.fasta -pcr_strip_primers -maxhits 2)
+#minlength and maxlength should be changed according to the length of target region
+trim.seqs(fasta=mock_moira_pcrstriped.fasta,minlength=400,maxlength=500)
+system(mv mock_moira_pcrstriped.trim.fasta mock.trim.contigs.good.pcr.fasta)
+unique.seqs(fasta=mock.trim.contigs.good.pcr.fasta, count=mock_moira.count_table)
+align.seqs(fasta=mock.trim.contigs.good.pcr.unique.fasta,reference=~/silva.bacteria/silva.bacteria.fasta,processors=12)
+summary.seqs(fasta=mock.trim.contigs.good.pcr.unique.align,count=mock.trim.contigs.good.pcr.count_table)
