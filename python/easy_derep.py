@@ -15,7 +15,7 @@ class Table(object):
             for linelist in reader:
                 key = []
                 for col in column:
-                    key.append(linelist[col-1])
+                    key.append(linelist[col-1]) #make the index user-friendly
                 if key in keylist:
                     continue
                 self.table.append(linelist)
@@ -38,5 +38,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     table = Table()
-    table.ReadTable(args.input, args.column)
+    table.ReadTable(args.input, args.columns)
     table.PrintTable(args.output)
