@@ -33,7 +33,7 @@ if __name__ == '__main__':
         Delete duplicate rows based on selected columns
         '''))
     parser.add_argument('-i', '--input', type=str, help='Input table', action='store', required=True)
-    parser.add_argument('-c', '--columns', type=int, help='The index of the key column in the table', action='append', required=True)
+    parser.add_argument('-c', '--columns', type=int, help='The index of the key column in the table', nargs='+', required=True)
     parser.add_argument('-o', '--output', type=str, help='Output file name', required=True)
     args = parser.parse_args()
 
