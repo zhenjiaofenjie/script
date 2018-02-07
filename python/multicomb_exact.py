@@ -29,19 +29,22 @@ class TableCombined(object):
             wr = csv.writer(o, delimiter= '\t')
             wr.writerows(self.table)
 
-def CombineTable(l, r, lci, rci, combined):
+def CombineTable(l, r, lci, rci, combined, ignorecase):
     dictid = {}
     with open(r, 'r') as rtable:
         reader = csv.reader(rtable, dialect='excel-tab')
         for linelist in reader:
             if re.match('^#', linelist[0]):
                 continue
-            dictid[linelist.pop(rci)] = linelist
+            if ignorecase:
+                dictid[linelist.pop(rci).lower()] = linelist
+            else:
+                dictid[linelist.pop(rci)] = linelist
     rcols = len(linelist)
 
 
     if l in combined.index:
-        if l+str(lci) in combined.lcidict:
+        if l+str(lci) in combined.lcidict: #the lci is the previously omitted key column, use previous lci instead
             lci = combined.lcidict[l+str(lci)]
         elif l in combined.rcidict and lci > combined.rcidict[l]:  #the lci is after the previously omitted key column, thus it should minus the omitted column
             lci += combined.index[l] - 1 #index is to show where the l starts in the combined table
@@ -57,11 +60,13 @@ def CombineTable(l, r, lci, rci, combined):
         combined.index[l] = 0
 
     combined.lcidict[r+str(rci)] = lci #this column has been omitted, could not be used as key in the future
-    combined.rcidict[r] = rci
+    combined.rcidict[r] = rci #record the index of omitted key column
     temp = []
     for row in combined.table:
         if row[lci] in dictid:
             temp.append(row+dictid[row[lci]])
+        elif row[lci].lower() in dictid and ignorecase:
+            temp.append(row+dictid[row[lci].lower()])
         else:
             for i in range(rcols):
                 row.append('-')
@@ -82,16 +87,18 @@ if __name__ == '__main__':
         Use "-l LF -r RF --lci LN --rci RN" muliple times to merge all tables together.
         Make sure each LF except the first one has been mentioned in previous combinations.
         '''))
+    parser.add_argument('--ignorecase', action='store_true', help='Ignore the case of key columns')
     parser.add_argument('-l', type=str, help='Left table', action='append', required=True, metavar='LF')
     parser.add_argument('-r', type=str, help='Right table', action='append', required=True, metavar='RF')
     parser.add_argument('--lci', type=int, help='The index of the key column in the left table', action='append', metavar='LN', required=True)
     parser.add_argument('--rci', type=int, help='The index of the key column in the right table', action='append', metavar='RN', required=True)
     parser.add_argument('-o', '--output', type=str, help='Output file name', required=True)
     args = parser.parse_args()
+
     check_args(args)
 
     combined = TableCombined()
     for l, r, lci, rci in zip(args.l, args.r, args.lci, args.rci): #args.lci and args.rci start from 1
-        combined = CombineTable(l, r, lci-1, rci-1, combined) #lci and rci start from 0
+        combined = CombineTable(l, r, lci-1, rci-1, combined, args.ignorecase) #lci and rci start from 0
 
     combined.PrintTable(args.output)
