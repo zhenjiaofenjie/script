@@ -18,7 +18,7 @@ class dotgraph:
                 while line.count("[") != line.count("]"):
                     line = line+f.next()
                 self.lines.append(line)
-                m = re.search("original_id=\"\[?\'?(.*?)(\'\])?\"", line)
+                m = re.search("original_id=\"\[?u?\'?(.*?)(\'\])?\"", line)
                 if m:
                     id = m.group(1)
                     m = re.search("fillcolor=\"(#\w*)\"", line)
@@ -35,7 +35,7 @@ class dotgraph:
     def change_color(self):
         lines = []
         for line in self.lines:
-            m = re.search("original_id=\"\[?\'?(.*?)(\'\])?\"", line)
+            m = re.search("original_id=\"\[?u?\'?(.*?)(\'\])?\"", line)
             if m:
                 id = m.group(1)
                 if id in self.colormap:
