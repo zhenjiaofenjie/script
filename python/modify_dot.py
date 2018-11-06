@@ -1,7 +1,6 @@
 #!/bin/env python
 import re, os
 from collections import defaultdict
-import imageio
 import argparse, textwrap
 
 class dotgraph:
