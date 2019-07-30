@@ -1,4 +1,5 @@
 import argparse
+import sys
 from multiprocessing import Pool
 from collections import OrderedDict
 import pandas as pd
@@ -243,6 +244,7 @@ def one_chain(m, warmup, maxiter, ns, upper, lower, epsilon, k, maxtry):
             x.append(xm_flux)
             if (niter + 1) // k % 100 == 0:
                 print((niter + 1) // k)
+                sys.stdout.flush()
     print('Point %i is done...' % m)
     return np.array(x)
 
@@ -387,6 +389,7 @@ class ACHR(sampler):
                 npoint += 1
                 if (npoint - nwarm) % 100 == 0:
                     print('%i/%i' % (npoint - nwarm, nsample))
+                    sys.stdout.flush()
             except stepError:
                 # print('stuck')
                 xm = s
