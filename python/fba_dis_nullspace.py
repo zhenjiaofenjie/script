@@ -431,17 +431,19 @@ if __name__ == "__main__":
         args.objective = nm.biomass_reaction
 
     if args.sampler.lower() == 'optgp':
+        args.sampler = 'optGp'
         s = optGp(mm, Solver(), objective=args.objective,
                   objective_scale=args.threshold, nproc=args.nproc)
     elif args.sampler.lower() == 'achr':
+        args.sampler = 'ACHR'
         s = ACHR(mm, Solver(), objective=args.objective,
                  objective_scale=args.threshold)
     else:
-        raise RuntimeError('Bad choices of sampler!')
+        raise RuntimeError('Bad choice of sampler!')
 
     s.set_warmup()
     result = s.sample(args.samples)
-    result.to_csv(args.output + '_sampling.csv')
+    result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
 
     plt.figure()
     test_r = PCA(2).fit(s.warmup_flux).transform(s.warmup_flux)
@@ -450,9 +452,4 @@ if __name__ == "__main__":
     plt.scatter(test_r[:, 0], test_r[:, 1], alpha=0.1,
                 color='r', label='sample')
     plt.legend(loc='best')
-    plt.savefig(args.output + '_sampling_PCA.pdf')
-
-    plt.figure()
-    result.loc[:, nm.biomass_reaction].plot('density')
-    plt.xlabel('Flux')
-    plt.savefig(args.output + '_sampling_biomass_dis.pdf')
+    plt.savefig('_'.join([args.output, args.sampler, 'sampling_PCA.pdf']))
