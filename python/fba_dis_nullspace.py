@@ -111,50 +111,18 @@ class sampler(object):
 
     @property
     def warmup_flux(self):
+        """The reaction fluxes of warmup points"""
         return self._warmup_flux
 
     @property
     def p(self):
+        """The underlying :class:`FluxBalanceProblem`"""
         return self._p
 
 
 class optGp(sampler):
     def __init__(self, *args, **kwargs):
         super(optGp, self).__init__(*args, **kwargs)
-
-    # def set_warmup(self):
-    #     """Set up warmup points for Monte Carlo sampling."""
-    #     self._warmup = list()
-    #     self._warmup_flux = list()
-    #     print('Setting up warmup points...')
-    #     for i in self._reactions:
-    #         if self._upper[i] - self._lower[i] < self._epsilon:
-    #             # skip fixed reaction
-    #             continue
-    #         try:  # maximize the flux of reaction i
-    #             self._p.maximize(i)
-    #             # store warmup points based on non-zero reacions only
-    #             if np.abs(self._p.get_flux(i)) > self._epsilon:
-    #                 fluxes = self._get_fluxes()
-    #                 self._warmup_flux.append(fluxes)
-    #                 self._warmup.append(self._get_projection(fluxes))
-    #         except FluxBalanceError:
-    #             pass
-    #         if self._model.is_reversible(i):
-    #             # maximize flux of reaction i in reverse direction
-    #             try:
-    #                 self._p.maximize({i: -1})
-    #                 # store warmup points based on effective reacions only
-    #                 if np.abs(self._p.get_flux(i)) > self._epsilon:
-    #                     fluxes = self._get_fluxes()
-    #                     self._warmup_flux.append(fluxes)
-    #                     self._warmup.append(self._get_projection(fluxes))
-    #             except FluxBalanceError:
-    #                 pass
-    #     self._warmup = np.array(self._warmup)
-    #     # maintain unrelated warmup points only
-    #     self._warmup = non_redundant(self._warmup)
-    #     self._warmup_flux = np.array(self._warmup_flux)
 
     def sample(self, nsample, k=100, maxtry=1):
         """Artificial Centering Hit-and-Run functioin"""
@@ -302,62 +270,6 @@ class ACHR(sampler):
         xm_flux = self._get_fluxes()
         xm = self._get_projection(xm_flux)
         return xm, xm_flux
-
-    # def set_warmup(self):
-    #     self._warmup = list()
-    #     self._warmup_flux = list()
-    #     # number of warmup points should be the
-    #     # same as the number of reactions
-    #     nwarm = len(self._reactions)
-    #     print('Setting up warmup points...')
-    #     start = list()
-    #     nstart = 0
-    #     while nstart < 10:
-    #         try:
-    #             x1, _ = self._random_optimize()
-    #             start.append(x1)
-    #             nstart += 1
-    #         except FluxBalanceError:
-    #             print('bad optimize')
-    #             pass
-    #     start = np.array(start)
-    #     # set the start point as the center
-    #     # of several FBA result to avoid trap
-    #     xm = start.mean(axis=0)
-    #     xm_flux = self._ns.dot(xm)
-    #     self._warmup_flux.append(xm_flux)
-    #     self._warmup.append(xm)
-    #     # the boundary of reaction fluxes
-    #     upper = np.array([i for i in self._upper.values()])
-    #     lower = np.array([i for i in self._lower.values()])
-    #     # random hit-and-run
-    #     for count in range(1, nwarm):
-    #         success = False
-    #         while not success:
-    #             try:
-    #                 new, new_flux = self._random_optimize()
-    #                 direction = new - xm
-    #                 # # pick a random direaction from the unit hypershpere
-    #                 # direction = np.random.normal(size=len(xm))
-    #                 # direction = np.divide(direction, norm(direction))
-    #                 direction_flux = self._ns.dot(direction)
-    #                 xm, xm_flux = one_step(xm, xm_flux, direction,
-    #                                        direction_flux, self._ns,
-    #                                        upper, lower, self._epsilon)
-    #                 success = True
-    #             except stepError:
-    #                 print('stuck')
-    #                 pass
-    #             except FluxBalanceError:
-    #                 print('bad optimize')
-    #                 pass
-    #         self._warmup.append(xm)
-    #         self._warmup_flux.append(xm_flux)
-    #         if count % 100 == 0:
-    #             print('%i/%i' % (count, nwarm))
-
-    #     self._warmup = np.array(self._warmup)
-    #     self._warmup_flux = np.array(self._warmup_flux)
 
     def sample(self, nsample):
         """Artificial Centering Hit-and-Run functioin"""
