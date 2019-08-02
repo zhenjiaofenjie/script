@@ -20,7 +20,7 @@ class stepError(Exception):
 
 
 class sampler(object):
-    def __init__(self, metabolic_model, solver,
+    def __init__(self, metabolic_model, solver, fix=None,
                  objective=None, objective_scale=1, nproc=1, epsilon=1e-5):
         self._model = metabolic_model
         self._solver = solver
@@ -35,13 +35,24 @@ class sampler(object):
         self._objective = objective
         self._objective_scale = objective_scale
         self._nproc = nproc
+        self._fix = dict()
+        # set value for fixed reactions
+        if fix is not None:
+            fix = fix.split(';')
+            for i in fix:
+                rxn, value = i.split(',')
+                self._fix[rxn] = float(value)
+                self._p.prob.add_linear_constraints(
+                    self._p.get_flux_var(rxn) == float(value)
+                )
+        # set objective reactions
         if self._objective is not None:
             if not self._model.has_reaction(self._objective):
                 raise RuntimeError('No reaction %s in model!' % objective)
             # get the maximium objective value of this model
             self._p.maximize(self._objective)
             self._objective_value = self._p.get_flux(self._objective)
-            # # force the model to product max objective flux
+            # force the model to product max objective flux
             self._p.prob.add_linear_constraints(self._p.get_flux_var(
                 self._objective) >= self._objective_value * objective_scale)
         self._set_limits()
@@ -51,11 +62,15 @@ class sampler(object):
         self._upper = OrderedDict()
         self._lower = OrderedDict()
         for rxn in self._reactions:
-            l, u = self._model.limits[rxn]
-            self._lower[rxn] = float(l)
-            self._upper[rxn] = float(u)
+            if rxn in self._fix:
+                self._lower[rxn] = self._fix[rxn]
+                self._upper[rxn] = self._fix[rxn]
+            else:
+                l, u = self._model.limits[rxn]
+                self._lower[rxn] = float(l)
+                self._upper[rxn] = float(u)
         # reset limits of objective reaction
-        if self._objective is not None:
+        if self._objective is not None and self._objective not in self._fix:
             self._upper[self._objective] = self._objective_value
             self._lower[self._objective] = (self._objective_value
                                             * self._objective_scale)
@@ -105,6 +120,9 @@ class sampler(object):
                 except FluxBalanceError:
                     pass
         self._warmup = np.array(self._warmup)
+        if len(self._warmup) <= 1:
+            raise RuntimeError("Can't get solutions based on current "
+                               "flux limitations! Please check your model.")
         # maintain unrelated warmup points only
         self._warmup = non_redundant(self._warmup)
         self._warmup_flux = np.array(self._warmup_flux)
@@ -329,6 +347,11 @@ if __name__ == "__main__":
     parser.add_argument('--threshold', type=float, default=1.0,
                         help=('ratio of maximum objective flux to maintain '
                               '(0.0~1.0, default: 1.0)'))
+    parser.add_argument('--fix',
+                        help=('id,value pairs to fix the flux of reaction '
+                              'at certain value, multiple pairs can be '
+                              'separated by ";". e.g. '
+                              'id1,value1;id2,value2'))
     parser.add_argument('-o', '--output', required=True,
                         help='output file name')
     parser.add_argument('--sampler', default='optgp',
@@ -347,11 +370,11 @@ if __name__ == "__main__":
 
     if args.sampler.lower() == 'optgp':
         args.sampler = 'optGp'
-        s = optGp(mm, Solver(), objective=args.objective,
+        s = optGp(mm, Solver(), fix=args.fix, objective=args.objective,
                   objective_scale=args.threshold, nproc=args.nproc)
     elif args.sampler.lower() == 'achr':
         args.sampler = 'ACHR'
-        s = ACHR(mm, Solver(), objective=args.objective,
+        s = ACHR(mm, Solver(), fix=args.fix, objective=args.objective,
                  objective_scale=args.threshold)
     else:
         raise RuntimeError('Bad choice of sampler!')
