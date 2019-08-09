@@ -21,7 +21,7 @@ class stepError(Exception):
 
 class sampler(object):
     def __init__(self, metabolic_model, solver, fix=None,
-                 objective=None, objective_scale=1, nproc=1, epsilon=1e-5):
+                 objective=None, objective_scale=1, nproc=1, epsilon=1e-9):
         self._model = metabolic_model
         self._solver = solver
         # the original stoichiometric matrix
@@ -92,7 +92,6 @@ class sampler(object):
 
     def set_warmup(self):
         """Set up warmup points for Monte Carlo sampling."""
-        self._warmup = list()
         self._warmup_flux = list()
         print('Setting up warmup points...')
         for i in self._reactions:
@@ -105,7 +104,6 @@ class sampler(object):
                 if np.abs(self._p.get_flux(i)) > self._epsilon:
                     fluxes = self._get_fluxes()
                     self._warmup_flux.append(fluxes)
-                    self._warmup.append(self._get_projection(fluxes))
             except FluxBalanceError:
                 pass
             if self._model.is_reversible(i):
@@ -116,16 +114,14 @@ class sampler(object):
                     if np.abs(self._p.get_flux(i)) > self._epsilon:
                         fluxes = self._get_fluxes()
                         self._warmup_flux.append(fluxes)
-                        self._warmup.append(self._get_projection(fluxes))
                 except FluxBalanceError:
                     pass
-        self._warmup = np.array(self._warmup)
-        if len(self._warmup) <= 1:
+        self._warmup_flux = np.array(self._warmup_flux)
+        if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
                                "flux limitations! Please check your model.")
         # maintain unrelated warmup points only
-        self._warmup = non_redundant(self._warmup)
-        self._warmup_flux = np.array(self._warmup_flux)
+        self._warmup_flux = non_redundant(self._warmup_flux)
 
     @property
     def warmup_flux(self):
@@ -146,13 +142,13 @@ class optGp(sampler):
         """Artificial Centering Hit-and-Run functioin"""
         print('Doing artificial centering hit-and-run')
         # number of warmup points
-        nwarm = len(self._warmup)
+        nwarm = len(self._warmup_flux)
         maxiter = nsample * k // self._nproc + 1
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
         if self._nproc == 1:
             m = np.random.choice(nwarm)
-            x = one_chain(m, self._warmup, maxiter, self._ns,
+            x = one_chain(m, self._warmup_flux, maxiter,
                           upper, lower, self._epsilon,
                           k, maxtry)
             return pd.DataFrame(x, columns=self._reactions)
@@ -160,7 +156,7 @@ class optGp(sampler):
         elif self._nproc > 1:
             pool = Pool(self._nproc)
             tasks = ((one_chain,
-                      (m, self._warmup, maxiter, self._ns,
+                      (m, self._warmup_flux, maxiter,
                        upper, lower, self._epsilon, k, maxtry))
                      for m in np.random.choice(nwarm, self._nproc))
             x = pool.map(parallel_worker, tasks)
@@ -185,50 +181,48 @@ def parallel_worker(tasks):
     return func(*params)
 
 
-def one_chain(m, warmup, maxiter, ns, upper, lower, epsilon, k, maxtry):
+def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
     print('Start on point %i' % m)
     x = list()
-    nwarm = len(warmup)
+    nwarm = len(warmup_flux)
     npoints = nwarm
     # prevent altering the original warmup points
-    warmup = np.copy(warmup)
+    warmup_flux = np.copy(warmup_flux)
     # get the center point
-    s = warmup.mean(axis=0)
+    s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    xm = (warmup[m] - s) * 0.9 + s
-    xm_flux = ns.dot(xm)
+    xm_flux = (warmup_flux[m] - s) * 0.9 + s
     for niter in range(maxiter):
         success = False
         # wait until a successful move
         while True:
             for ntry in range(maxtry):
                 n = np.random.choice(nwarm)
-                xn = warmup[n]
-                direction = xn - s
-                direction_flux = ns.dot(direction)
+                xn_flux = warmup_flux[n]
+                direction_flux = xn_flux - s
                 try:
-                    xm, xm_flux = one_step(xm, xm_flux, direction,
-                                           direction_flux, ns,
-                                           upper, lower, epsilon)
+                    xm_flux = one_step(xm_flux, direction_flux,
+                                       upper, lower, epsilon)
                     success = True  # successfully got the next point
                     break
-                except stepError:
+                except stepError as e:
+                    print(e)
+                    sys.stdout.flush()
                     pass
             if success:
                 break
             # too many failures, move xm to new position
             # set up starting point
-            # pull back to center to avoid stuck
-            xm = s
-            xm_flux = ns.dot(xm)
+            # pull back a bit to avoid stuck
+            xm_flux = (xm_flux - s) * 0.9 + s
         npoints += 1
         # recalculate the center
-        s = (s * (nwarm - 1) + xm) / nwarm
+        s = (s * (nwarm - 1) + xm_flux) / nwarm
         # randomly substrate xm to warmup points
         n = np.random.choice(nwarm)
-        warmup[n] = xm
+        warmup_flux[n] = xm_flux
         # output only one point every k iter
         if (niter + 1) % k == 0:
             # add new point
@@ -240,9 +234,20 @@ def one_chain(m, warmup, maxiter, ns, upper, lower, epsilon, k, maxtry):
     return np.array(x)
 
 
-def one_step(xm, xm_flux, direction, direction_flux,
-             ns, upper, lower, epsilon):
+def get_projection(x, ns, epsilon):
+    """obtain the FBA result in null space"""
+    projection = lstsq(ns, x)
+    if projection[1] > epsilon:
+        raise RuntimeError('Failed to project point into null space!')
+    return projection[0]
+
+
+def one_step(xm_flux, direction_flux,
+             upper, lower, epsilon):
     """Move one step further on one chain"""
+    if (np.sum(xm_flux - upper > epsilon) > 0
+            or np.sum(xm_flux - lower < -epsilon) > 0):
+        raise stepError('Point is out of boundary!')
     index = np.abs(direction_flux) > epsilon
     up_zero = np.abs(upper - xm_flux)[index] < epsilon
     down_zero = np.abs(lower - xm_flux)[index] < epsilon
@@ -260,16 +265,17 @@ def one_step(xm, xm_flux, direction, direction_flux,
         raise stepError('Cannot move!')
     # get the new point
     step = np.random.uniform(down, up)
-    new = xm + step * direction
-    new_flux = ns.dot(new)
-    while (np.sum(new_flux - upper > epsilon) > 0
+    # print(down, up, step)
+    direction_flux[~ index] = 0
+    new_flux = xm_flux + step * direction_flux
+    if (np.sum(new_flux - upper > epsilon) > 0
             or np.sum(new_flux - lower < -epsilon) > 0):
+        raise RuntimeError('New point is out of boundary!')
         # new point is out of boundary
-        step = np.random.sample() * step
-        new = xm + step * direction
-        new_flux = ns.dot(new)
+        step = 0.95 * step
+        new_flux = xm_flux + step * direction_flux
     # got acceptable result
-    return new, new_flux
+    return new_flux
 
 
 class ACHR(sampler):
@@ -297,38 +303,32 @@ class ACHR(sampler):
     def sample(self, nsample):
         """Artificial Centering Hit-and-Run functioin"""
         print('Doing artificial centering hit-and-run')
-        points = [row for row in self._warmup]
         points_flux = [row for row in self._warmup_flux]
-        npoint = len(points)
-        nwarm = len(self._warmup)
+        npoint = len(points_flux)
+        nwarm = len(self._warmup_flux)
         # center of warmup points
-        s = self._warmup.mean(axis=0)
+        s = self._warmup_flux.mean(axis=0)
         # starting point
-        # xm = points[npoint - 1]
-        xm = s
-        xm_flux = points_flux[npoint - 1]
+        xm_flux = s
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
         while npoint - nwarm < nsample:
             n = np.random.choice(npoint)
-            xn = points[n]
-            direction = xn - s
-            direction_flux = self._ns.dot(direction)
+            xn_flux = points_flux[n]
+            direction_flux = xn_flux - s
             try:
-                xm, xm_flux = one_step(xm, xm_flux, direction, direction_flux,
-                                       self._ns, upper, lower, self._epsilon)
-                points.append(xm)
+                xm_flux = one_step(xm_flux, direction_flux,
+                                   upper, lower, self._epsilon)
                 points_flux.append(xm_flux)
                 # recalculate center
-                s = (s * npoint + xm) / (npoint + 1)
+                s = (s * npoint + xm_flux) / (npoint + 1)
                 npoint += 1
                 if (npoint - nwarm) % 100 == 0:
                     print('%i/%i' % (npoint - nwarm, nsample))
                     sys.stdout.flush()
             except stepError:
                 # print('stuck')
-                xm = s
-                xm_flux = self._ns.dot(xm)
+                xm_flux = s
                 pass
         return pd.DataFrame(points_flux[nwarm:],
                             columns=self._reactions).round(
@@ -376,11 +376,12 @@ if __name__ == "__main__":
     if args.sampler.lower() == 'optgp':
         args.sampler = 'optGp'
         s = optGp(mm, Solver(), fix=args.fix, objective=args.objective,
-                  objective_scale=args.threshold, nproc=args.nproc)
+                  objective_scale=args.threshold, nproc=args.nproc,
+                  epsilon=1e-9)
     elif args.sampler.lower() == 'achr':
         args.sampler = 'ACHR'
         s = ACHR(mm, Solver(), fix=args.fix, objective=args.objective,
-                 objective_scale=args.threshold)
+                 objective_scale=args.threshold, epsilon=1e-9)
     else:
         raise RuntimeError('Bad choice of sampler!')
 
