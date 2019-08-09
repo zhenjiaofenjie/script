@@ -268,12 +268,6 @@ def one_step(xm_flux, direction_flux,
     # print(down, up, step)
     direction_flux[~ index] = 0
     new_flux = xm_flux + step * direction_flux
-    if (np.sum(new_flux - upper > epsilon) > 0
-            or np.sum(new_flux - lower < -epsilon) > 0):
-        raise RuntimeError('New point is out of boundary!')
-        # new point is out of boundary
-        step = 0.95 * step
-        new_flux = xm_flux + step * direction_flux
     # got acceptable result
     return new_flux
 
@@ -328,7 +322,7 @@ class ACHR(sampler):
                     sys.stdout.flush()
             except stepError:
                 # print('stuck')
-                xm_flux = s
+                xm_flux = (xm_flux - s) * 0.9 + s
                 pass
         return pd.DataFrame(points_flux[nwarm:],
                             columns=self._reactions).round(
