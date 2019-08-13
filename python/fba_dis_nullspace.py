@@ -172,7 +172,7 @@ def non_redundant(x, threshold=0.95):
     corr = np.corrcoef(x)
     corr = np.tril(corr, -1)
     index = (corr > threshold).any(axis=1)
-    return x[index]
+    return x[~index]
 
 
 def parallel_worker(tasks):
