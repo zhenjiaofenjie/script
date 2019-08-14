@@ -183,7 +183,7 @@ def parallel_worker(tasks):
 
 def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
-    print('Start on point %i' % m)
+    # print('Start on point %i' % m)
     x = list()
     nwarm = len(warmup_flux)
     npoints = nwarm
@@ -193,7 +193,8 @@ def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
     s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    xm_flux = (warmup_flux[m] - s) * 0.9 + s
+    # xm_flux = (warmup_flux[m] - s) * 0.9 + s
+    xm_flux = s
     for niter in range(maxiter):
         success = False
         # wait until a successful move
@@ -230,7 +231,7 @@ def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
             if (niter + 1) // k % 100 == 0:
                 print((niter + 1) // k)
                 sys.stdout.flush()
-    print('Point %i is done...' % m)
+    # print('Point %i is done...' % m)
     return np.array(x)
 
 
@@ -266,7 +267,7 @@ def one_step(xm_flux, direction_flux,
     # get the new point
     step = np.random.uniform(down, up)
     # print(down, up, step)
-    direction_flux[~ index] = 0
+    # direction_flux[~ index] = 0
     new_flux = xm_flux + step * direction_flux
     # got acceptable result
     return new_flux
@@ -371,11 +372,11 @@ if __name__ == "__main__":
         args.sampler = 'optGp'
         s = optGp(mm, Solver(), fix=args.fix, objective=args.objective,
                   objective_scale=args.threshold, nproc=args.nproc,
-                  epsilon=1e-9)
+                  epsilon=1e-7)
     elif args.sampler.lower() == 'achr':
         args.sampler = 'ACHR'
         s = ACHR(mm, Solver(), fix=args.fix, objective=args.objective,
-                 objective_scale=args.threshold, epsilon=1e-9)
+                 objective_scale=args.threshold, epsilon=1e-7)
     else:
         raise RuntimeError('Bad choice of sampler!')
 
