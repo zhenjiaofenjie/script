@@ -82,6 +82,24 @@ class sampler(object):
             raise RuntimeError('Failed to project point into null space!')
         return projection[0]
 
+    def _random_optimize(self):
+        # new optimize project
+        optimize = dict()
+        for i in self._reactions:
+            limit_range = self._upper[i] - self._lower[i]
+            # skip fixed reaction
+            if limit_range < self._epsilon:
+                continue
+            # randomly set optimize weight
+            if self._upper[i] * self._lower[i] < 0:
+                optimize[i] = 2 * np.random.sample() - 1.0
+            else:
+                optimize[i] = np.random.sample()
+        self._p.maximize(optimize)
+        xm_flux = self._get_fluxes()
+        xm = self._get_projection(xm_flux)
+        return xm, xm_flux
+
     def _get_fluxes(self):
         """obtain the FBA result"""
         x = list()
@@ -89,6 +107,13 @@ class sampler(object):
             x.append(self._p.get_flux(rxn))
         x = np.array(x)
         return x
+
+    def _non_redundant(self, x):
+        """Run pairwise Pearson correlation to find non-redundant rows"""
+        corr = np.corrcoef(x)
+        corr = np.tril(corr, -1)
+        index = (corr > 1.0 - self._epsilon).any(axis=1)
+        return x[~index]
 
     def set_warmup(self):
         """Set up warmup points for Monte Carlo sampling."""
@@ -106,7 +131,7 @@ class sampler(object):
                     self._warmup_flux.append(fluxes)
             except FluxBalanceError:
                 pass
-            if self._model.is_reversible(i):
+            if self._upper[i] * self._lower[i] < 0:
                 # maximize flux of reaction i in reverse direction
                 try:
                     self._p.maximize({i: -1})
@@ -121,7 +146,10 @@ class sampler(object):
             raise RuntimeError("Can't get solutions based on current "
                                "flux limitations! Please check your model.")
         # maintain unrelated warmup points only
-        self._warmup_flux = non_redundant(self._warmup_flux)
+        self._warmup_flux = self._non_redundant(self._warmup_flux)
+        print(('Total reactions: %i\n'
+               'Non-redundant warmup points: %i')
+              % (len(self._reactions), len(self._warmup_flux)))
 
     @property
     def warmup_flux(self):
@@ -163,16 +191,7 @@ class optGp(sampler):
             pool.close()
             pool.join()
             return pd.DataFrame(np.vstack(x),
-                                columns=self._reactions).round(
-                                    int(-np.log10(self._epsilon)))
-
-
-def non_redundant(x, threshold=0.95):
-    """Run pairwise Pearson correlation to find non-redundant rows"""
-    corr = np.corrcoef(x)
-    corr = np.tril(corr, -1)
-    index = (corr > threshold).any(axis=1)
-    return x[~index]
+                                columns=self._reactions)
 
 
 def parallel_worker(tasks):
@@ -186,15 +205,13 @@ def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
     # print('Start on point %i' % m)
     x = list()
     nwarm = len(warmup_flux)
-    npoints = nwarm
     # prevent altering the original warmup points
     warmup_flux = np.copy(warmup_flux)
     # get the center point
     s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    # xm_flux = (warmup_flux[m] - s) * 0.9 + s
-    xm_flux = s
+    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.95)
     for niter in range(maxiter):
         success = False
         # wait until a successful move
@@ -218,7 +235,6 @@ def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
             # set up starting point
             # pull back a bit to avoid stuck
             xm_flux = (xm_flux - s) * 0.9 + s
-        npoints += 1
         # recalculate the center
         s = (s * (nwarm - 1) + xm_flux) / nwarm
         # randomly substrate xm to warmup points
@@ -244,7 +260,7 @@ def get_projection(x, ns, epsilon):
 
 
 def one_step(xm_flux, direction_flux,
-             upper, lower, epsilon):
+             upper, lower, epsilon, step=None):
     """Move one step further on one chain"""
     if (np.sum(xm_flux - upper > epsilon) > 0
             or np.sum(xm_flux - lower < -epsilon) > 0):
@@ -265,9 +281,10 @@ def one_step(xm_flux, direction_flux,
         # can't move
         raise stepError('Cannot move!')
     # get the new point
-    step = np.random.uniform(down, up)
-    # print(down, up, step)
-    # direction_flux[~ index] = 0
+    if step is None:
+        step = np.random.uniform(down, up)
+    else:
+        step = down + step * (up - down)
     new_flux = xm_flux + step * direction_flux
     # got acceptable result
     return new_flux
@@ -276,24 +293,6 @@ def one_step(xm_flux, direction_flux,
 class ACHR(sampler):
     def __init__(self, *args, **kwargs):
         super(ACHR, self).__init__(*args, **kwargs)
-
-    def _random_optimize(self):
-        # new optimize project
-        optimize = dict()
-        for i in self._reactions:
-            limit_range = self._upper[i] - self._lower[i]
-            # skip fixed reaction
-            if limit_range < self._epsilon:
-                continue
-            # randomly set optimize weight
-            if self._upper[i] * self._lower[i] < 0:
-                optimize[i] = 2 * np.random.sample() - 1.0
-            else:
-                optimize[i] = np.random.sample()
-        self._p.maximize(optimize)
-        xm_flux = self._get_fluxes()
-        xm = self._get_projection(xm_flux)
-        return xm, xm_flux
 
     def sample(self, nsample):
         """Artificial Centering Hit-and-Run functioin"""
@@ -326,8 +325,7 @@ class ACHR(sampler):
                 xm_flux = (xm_flux - s) * 0.9 + s
                 pass
         return pd.DataFrame(points_flux[nwarm:],
-                            columns=self._reactions).round(
-                                int(-np.log10(self._epsilon)))
+                            columns=self._reactions)
 
 
 if __name__ == "__main__":
