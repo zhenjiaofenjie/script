@@ -173,7 +173,7 @@ class optGp(sampler):
         lower = np.array([i for i in self._lower.values()])
         if self._nproc == 1:
             m = np.random.choice(nwarm)
-            x = one_chain(m, self._warmup_flux, maxiter,
+            x = one_chain(m, self._warmup_flux, self._ns, maxiter,
                           upper, lower, self._epsilon,
                           k, maxtry)
             return pd.DataFrame(x, columns=self._reactions)
@@ -181,7 +181,7 @@ class optGp(sampler):
         elif self._nproc > 1:
             pool = Pool(self._nproc)
             tasks = ((one_chain,
-                      (m, self._warmup_flux, maxiter,
+                      (m, self._warmup_flux, self._ns, maxiter,
                        upper, lower, self._epsilon, k, maxtry))
                      for m in np.random.choice(nwarm, self._nproc))
             x = pool.map(parallel_worker, tasks)
@@ -197,7 +197,7 @@ def parallel_worker(tasks):
     return func(*params)
 
 
-def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
+def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
     # print('Start on point %i' % m)
     x = list()
@@ -239,6 +239,9 @@ def one_chain(m, warmup_flux, maxiter, upper, lower, epsilon, k, maxtry):
         # warmup_flux[n] = xm_flux
         # output only one point every k iter
         if (niter + 1) % k == 0:
+            # re-project point into null space
+            xm = ns.T.dot(xm_flux)
+            xm_flux = ns.dot(xm)
             # add new point
             x.append(xm_flux)
             if (niter + 1) // k % 100 == 0:
@@ -306,6 +309,8 @@ class ACHR(sampler):
             try:
                 xm_flux = one_step(xm_flux, direction_flux,
                                    upper, lower, self._epsilon)
+                xm = self._ns.T.dot(xm_flux)
+                xm_flux = self._ns.dot(xm)
                 points_flux.append(xm_flux)
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
