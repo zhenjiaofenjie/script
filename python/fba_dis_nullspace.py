@@ -8,9 +8,6 @@ import numpy as np
 from psamm.lpsolver.cplex import Solver
 from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
 from psamm.datasource.native import ModelReader
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt  # noqa
 
 
 class stepError(Exception):
@@ -114,7 +111,7 @@ class sampler(object):
         """Run pairwise Pearson correlation to find non-redundant rows"""
         corr = np.corrcoef(x)
         corr = np.tril(corr, -1)
-        index = (corr > 1.0 - self._epsilon).any(axis=1)
+        index = (corr > (1.0 - self._epsilon)).any(axis=1)
         return x[~index]
 
     def set_warmup(self):
@@ -128,25 +125,23 @@ class sampler(object):
             try:  # maximize the flux of reaction i
                 self._p.maximize(i)
                 # store warmup points based on non-zero reacions only
-                if np.abs(self._p.get_flux(i)) > self._epsilon:
-                    fluxes = self._get_fluxes()
-                    self._warmup_flux.append(fluxes)
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
             except FluxBalanceError:
                 pass
-            if self._upper[i] * self._lower[i] < 0:
-                # maximize flux of reaction i in reverse direction
-                try:
-                    self._p.maximize({i: -1})
-                    # store warmup points based on effective reacions only
-                    if np.abs(self._p.get_flux(i)) > self._epsilon:
-                        fluxes = self._get_fluxes()
-                        self._warmup_flux.append(fluxes)
-                except FluxBalanceError:
-                    pass
+            # maximize flux of reaction i in reverse direction
+            try:
+                self._p.maximize({i: -1})
+                # store warmup points based on effective reacions only
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
                                "flux limitations! Please check your model.")
+        print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
         self._warmup_flux = self._non_redundant(self._warmup_flux)
         print(('Total reactions: %i\n'
