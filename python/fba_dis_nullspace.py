@@ -3,7 +3,6 @@ import sys
 from multiprocessing import Pool
 from collections import OrderedDict
 import pandas as pd
-from sklearn.decomposition import PCA
 from scipy.linalg import null_space, lstsq
 import numpy as np
 from psamm.lpsolver.cplex import Solver
@@ -381,12 +380,3 @@ if __name__ == "__main__":
     s.set_warmup()
     result = s.sample(args.samples)
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
-
-    plt.figure()
-    test_r = PCA(2).fit(s.warmup_flux).transform(s.warmup_flux)
-    plt.scatter(test_r[:, 0], test_r[:, 1], alpha=0.1, label='warmup')
-    test_r = PCA(2).fit(s.warmup_flux).transform(result)
-    plt.scatter(test_r[:, 0], test_r[:, 1], alpha=0.1,
-                color='r', label='sample')
-    plt.legend(loc='best')
-    plt.savefig('_'.join([args.output, args.sampler, 'sampling_PCA.pdf']))
