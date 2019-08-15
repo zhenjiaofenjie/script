@@ -76,9 +76,12 @@ class sampler(object):
 
     def _get_projection(self, x, check=True):
         """obtain the FBA result in null space"""
-        projection = lstsq(self._ns, x)
-        if projection[1] > self._epsilon and check:
-            raise RuntimeError('Failed to project point into null space!')
+        if check:
+            projection = lstsq(self._ns, x)
+            if projection[1] > self._epsilon:
+                raise RuntimeError('Point violate null space!')
+        else:
+            projection = self._ns.T.dot(x)
         return projection[0]
 
     def _random_optimize(self):
