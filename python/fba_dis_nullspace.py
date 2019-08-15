@@ -230,8 +230,9 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
                 break
             # too many failures, move xm to new position
             # set up starting point
-            # pull back a bit to avoid stuck
-            xm_flux = (xm_flux - s) * 0.9 + s
+            # pull back to avoid stuck
+            xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
+            # xm_flux = (xm_flux - s) * 0.9 + s
         # recalculate the center
         s = (s * (nwarm - 1) + xm_flux) / nwarm
         # # randomly substrate xm to warmup points
@@ -321,7 +322,10 @@ class ACHR(sampler):
             except stepError as e:
                 print(e)
                 sys.stdout.flush()
-                xm_flux = (xm_flux - s) * 0.9 + s
+                # pull back a bit
+                xm_flux = one_step(s, xm_flux - s, upper, lower,
+                                   self._epsilon, 0.9)
+                # xm_flux = (xm_flux - s) * 0.9 + s
                 pass
         return pd.DataFrame(points_flux[nwarm:],
                             columns=self._reactions)
