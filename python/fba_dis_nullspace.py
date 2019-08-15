@@ -263,14 +263,10 @@ def one_step(xm_flux, direction_flux,
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise stepError('Point is out of boundary!')
     index = np.abs(direction_flux) > epsilon
-    up_zero = np.abs(upper - xm_flux)[index] < epsilon
-    down_zero = np.abs(lower - xm_flux)[index] < epsilon
     scale_upper = (upper
                    - xm_flux)[index] / direction_flux[index]
-    scale_upper[up_zero] = 0
     scale_lower = (lower
                    - xm_flux)[index] / direction_flux[index]
-    scale_lower[down_zero] = 0
     scale = np.array([scale_upper, scale_lower])
     up = scale.max(axis=0).min()
     down = scale.min(axis=0).max()
