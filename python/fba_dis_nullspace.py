@@ -316,11 +316,12 @@ class ACHR(sampler):
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
                 npoint += 1
-                if (npoint - nwarm) % 100 == 0:
+                if (npoint - nwarm) % 10000 == 0:
                     print('%i/%i' % (npoint - nwarm, nsample))
                     sys.stdout.flush()
-            except stepError:
-                # print('stuck')
+            except stepError as e:
+                print(e)
+                sys.stdout.flush()
                 xm_flux = (xm_flux - s) * 0.9 + s
                 pass
         return pd.DataFrame(points_flux[nwarm:],
