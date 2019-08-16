@@ -96,8 +96,7 @@ class sampler(object):
                 optimize[i] = np.random.sample()
         self._p.maximize(optimize)
         xm_flux = self._get_fluxes()
-        xm = self._get_projection(xm_flux)
-        return xm, xm_flux
+        return xm_flux
 
     def _get_fluxes(self):
         """obtain the FBA result"""
@@ -199,7 +198,7 @@ def parallel_worker(tasks):
 
 def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
-    # print('Start on point %i' % m)
+    print('Start on point %i' % m)
     x = list()
     nwarm = len(warmup_flux)
     # prevent altering the original warmup points
@@ -240,15 +239,15 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
         # warmup_flux[n] = xm_flux
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            # re-project point into null space
-            xm = ns.T.dot(xm_flux)
-            xm_flux = ns.dot(xm)
+            # # re-project point into null space
+            # xm = ns.T.dot(xm_flux)
+            # xm_flux = ns.dot(xm)
             # add new point
             x.append(xm_flux)
-            if (niter + 1) // k % 100 == 0:
+            if (niter + 1) // k % 500 == 0:
                 print((niter + 1) // k)
                 sys.stdout.flush()
-    # print('Point %i is done...' % m)
+    print('Point %i is done...' % m)
     return np.array(x)
 
 
@@ -310,8 +309,9 @@ class ACHR(sampler):
             try:
                 xm_flux = one_step(xm_flux, direction_flux,
                                    upper, lower, self._epsilon)
-                xm = self._ns.T.dot(xm_flux)
-                xm_flux = self._ns.dot(xm)
+                # # reproject
+                # xm = self._ns.T.dot(xm_flux)
+                # xm_flux = self._ns.dot(xm)
                 points_flux.append(xm_flux)
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
@@ -360,6 +360,8 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--nproc', type=int, default=1,
                         help=('number of processes, only works '
                               'for optGp method (default: 1)'))
+    parser.add_argument('-e', '--epsilon', type=float, default=1e-9,
+                        help=('precision of sampling, (default: 1e-9)'))
     args = parser.parse_args()
 
     model = ModelReader.reader_from_path(args.model)
@@ -373,14 +375,18 @@ if __name__ == "__main__":
         args.sampler = 'optGp'
         s = optGp(mm, Solver(), fix=args.fix, objective=args.objective,
                   objective_scale=args.threshold, nproc=args.nproc,
-                  epsilon=1e-7)
+                  epsilon=args.epsilon)
     elif args.sampler.lower() == 'achr':
         args.sampler = 'ACHR'
         s = ACHR(mm, Solver(), fix=args.fix, objective=args.objective,
-                 objective_scale=args.threshold, epsilon=1e-7)
+                 objective_scale=args.threshold, epsilon=args.epsilon)
     else:
         raise RuntimeError('Bad choice of sampler!')
 
     s.set_warmup()
     result = s.sample(args.samples)
+    b = np.zeros(s._sm.shape[0])
+    for index, row in result.iterrows():
+        if not np.allclose(s._sm.dot(row), b):
+            print('Point %i violates equality' % index)
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
