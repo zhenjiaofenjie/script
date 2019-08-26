@@ -10,9 +10,14 @@ from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
 from psamm.datasource.native import ModelReader
 
 
-class stepError(Exception):
+class StuckError(Exception):
     def __init__(self, *args, **kwargs):
-        super(stepError, self).__init__(*args, **kwargs)
+        super(StuckError, self).__init__(*args, **kwargs)
+
+
+class OutOfBoundaryError(Exception):
+    def __init__(self, *args, **kwargs):
+        super(OutOfBoundaryError, self).__init__(*args, **kwargs)
 
 
 class sampler(object):
@@ -106,13 +111,6 @@ class sampler(object):
         x = np.array(x)
         return x
 
-    def _non_redundant(self, x):
-        """Run pairwise Pearson correlation to find non-redundant rows"""
-        corr = np.corrcoef(x)
-        corr = np.tril(corr, -1)
-        index = (corr > (1.0 - self._epsilon)).any(axis=1)
-        return x[~index]
-
     def set_warmup(self):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
@@ -121,28 +119,31 @@ class sampler(object):
             if self._upper[i] - self._lower[i] < self._epsilon:
                 # skip fixed reaction
                 continue
-            try:  # maximize the flux of reaction i
-                self._p.maximize(i)
-                # store warmup points based on non-zero reacions only
-                fluxes = self._get_fluxes()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                pass
+            # maximize positive flux
+            if self._upper[i] > self._epsilon:
+                try:  # maximize the flux of reaction i
+                    self._p.maximize(i)
+                    # store warmup points based on non-zero reacions only
+                    fluxes = self._get_fluxes()
+                    self._warmup_flux.append(fluxes)
+                except FluxBalanceError:
+                    pass
             # maximize flux of reaction i in reverse direction
-            try:
-                self._p.maximize({i: -1})
-                # store warmup points based on effective reacions only
-                fluxes = self._get_fluxes()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                pass
+            if self._lower[i] < -self._epsilon:
+                try:
+                    self._p.maximize({i: -1})
+                    # store warmup points based on effective reacions only
+                    fluxes = self._get_fluxes()
+                    self._warmup_flux.append(fluxes)
+                except FluxBalanceError:
+                    pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
                                "flux limitations! Please check your model.")
         print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
-        self._warmup_flux = self._non_redundant(self._warmup_flux)
+        self._warmup_flux = np.unique(self._warmup_flux, axis=0)
         print(('Total reactions: %i\n'
                'Non-redundant warmup points: %i')
               % (len(self._reactions), len(self._warmup_flux)))
@@ -207,7 +208,7 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
     s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.95)
+    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.9)
     for niter in range(maxiter):
         success = False
         # wait until a successful move
@@ -221,16 +222,17 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
                                        upper, lower, epsilon)
                     success = True  # successfully got the next point
                     break
-                except stepError as e:
-                    print(e)
-                    sys.stdout.flush()
+                except StuckError:
+                    pass
+                except OutOfBoundaryError:
                     pass
             if success:
                 break
             # too many failures, move xm to new position
             # set up starting point
             # pull back to avoid stuck
-            xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
+            xm_flux = s
+            # xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
             # xm_flux = (xm_flux - s) * 0.9 + s
         # recalculate the center
         s = (s * (nwarm - 1) + xm_flux) / nwarm
@@ -239,9 +241,10 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
         # warmup_flux[n] = xm_flux
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            # # re-project point into null space
-            # xm = ns.T.dot(xm_flux)
-            # xm_flux = ns.dot(xm)
+            # if not np.allclose(self._sm.dot(xm_flux), 0, 0, epsilon):
+            #     # re-project point into null space
+            #     xm = get_projection(xm_flux, ns, epsilon)
+            #     xm_flux = ns.dot(xm)
             # add new point
             x.append(xm_flux)
             if (niter + 1) // k % 500 == 0:
@@ -264,7 +267,7 @@ def one_step(xm_flux, direction_flux,
     """Move one step further on one chain"""
     if (np.sum(xm_flux - upper > epsilon) > 0
             or np.sum(xm_flux - lower < -epsilon) > 0):
-        raise stepError('Point is out of boundary!')
+        raise OutOfBoundaryError('Point is out of boundary!')
     index = np.abs(direction_flux) > epsilon
     scale_upper = (upper
                    - xm_flux)[index] / direction_flux[index]
@@ -275,7 +278,7 @@ def one_step(xm_flux, direction_flux,
     down = scale.min(axis=0).max()
     if up - down < epsilon:
         # can't move
-        raise stepError('Cannot move!')
+        raise StuckError('Cannot move!')
     # get the new point
     if step is None:
         step = np.random.uniform(down, up)
@@ -319,14 +322,15 @@ class ACHR(sampler):
                 if (npoint - nwarm) % 10000 == 0:
                     print('%i/%i' % (npoint - nwarm, nsample))
                     sys.stdout.flush()
-            except stepError as e:
-                print(e)
-                sys.stdout.flush()
+            except StuckError:
                 # pull back a bit
-                xm_flux = one_step(s, xm_flux - s, upper, lower,
-                                   self._epsilon, 0.9)
+                # xm_flux = one_step(s, xm_flux - s, upper, lower,
+                #                    self._epsilon, 0.9)
                 # xm_flux = (xm_flux - s) * 0.9 + s
+                xm_flux = s
                 pass
+            except OutOfBoundaryError:
+                xm_flux = s
         return pd.DataFrame(points_flux[nwarm:],
                             columns=self._reactions)
 
@@ -387,6 +391,8 @@ if __name__ == "__main__":
     result = s.sample(args.samples)
     b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
-        if not np.allclose(s._sm.dot(row), b):
-            print('Point %i violates equality' % index)
+        dot = s._sm.dot(row)
+        if not np.allclose(dot, b, 0, 1e-5):
+            print('Point %i violates equality, maximum value: %f'
+                  % (index, np.max(np.abs(dot))))
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
