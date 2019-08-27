@@ -235,10 +235,7 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
             # xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
             # xm_flux = (xm_flux - s) * 0.9 + s
         # recalculate the center
-        s = (s * (nwarm - 1) + xm_flux) / nwarm
-        # # randomly substrate xm to warmup points
-        # n = np.random.choice(nwarm)
-        # warmup_flux[n] = xm_flux
+        s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
         # output only one point every k iter
         if (niter + 1) % k == 0:
             # if not np.allclose(self._sm.dot(xm_flux), 0, 0, epsilon):
