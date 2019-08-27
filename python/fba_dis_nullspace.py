@@ -95,10 +95,7 @@ class sampler(object):
             if limit_range < self._epsilon:
                 continue
             # randomly set optimize weight
-            if self._upper[i] * self._lower[i] < 0:
-                optimize[i] = 2 * np.random.sample() - 1.0
-            else:
-                optimize[i] = np.random.sample()
+            optimize[i] = 2 * np.random.sample() - 1.0
         self._p.maximize(optimize)
         xm_flux = self._get_fluxes()
         return xm_flux
@@ -120,23 +117,23 @@ class sampler(object):
                 # skip fixed reaction
                 continue
             # maximize positive flux
-            if self._upper[i] > self._epsilon:
-                try:  # maximize the flux of reaction i
-                    self._p.maximize(i)
-                    # store warmup points based on non-zero reacions only
-                    fluxes = self._get_fluxes()
-                    self._warmup_flux.append(fluxes)
-                except FluxBalanceError:
-                    pass
+            try:  # maximize the flux of reaction i
+                self._p.maximize(i)
+                # store warmup points based on non-zero reacions only
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                RuntimeWarning('Failed to maximize the flux of %s' % i)
+                pass
             # maximize flux of reaction i in reverse direction
-            if self._lower[i] < -self._epsilon:
-                try:
-                    self._p.maximize({i: -1})
-                    # store warmup points based on effective reacions only
-                    fluxes = self._get_fluxes()
-                    self._warmup_flux.append(fluxes)
-                except FluxBalanceError:
-                    pass
+            try:
+                self._p.maximize({i: -1})
+                # store warmup points based on effective reacions only
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                RuntimeWarning('Failed to minimize the flux of %s' % i)
+                pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
@@ -208,7 +205,7 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
     s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.9)
+    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.95)
     for niter in range(maxiter):
         success = False
         # wait until a successful move
