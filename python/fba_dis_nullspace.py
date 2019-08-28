@@ -119,6 +119,7 @@ class sampler(object):
             # maximize positive flux
             try:  # maximize the flux of reaction i
                 self._p.maximize(i)
+                # self._p.max_min_l1(i)
                 # store warmup points based on non-zero reacions only
                 fluxes = self._get_fluxes()
                 self._warmup_flux.append(fluxes)
@@ -128,6 +129,7 @@ class sampler(object):
             # maximize flux of reaction i in reverse direction
             try:
                 self._p.maximize({i: -1})
+                # self._p.max_min_l1({i: -1})
                 # store warmup points based on effective reacions only
                 fluxes = self._get_fluxes()
                 self._warmup_flux.append(fluxes)
@@ -163,7 +165,7 @@ class optGp(sampler):
         super(optGp, self).__init__(*args, **kwargs)
 
     def sample(self, nsample, k=100, maxtry=1):
-        """Artificial Centering Hit-and-Run functioin"""
+        """Artificial Centering Hit-and-Run function"""
         print('Doing artificial centering hit-and-run')
         # number of warmup points
         nwarm = len(self._warmup_flux)
@@ -172,7 +174,7 @@ class optGp(sampler):
         lower = np.array([i for i in self._lower.values()])
         if self._nproc == 1:
             m = np.random.choice(nwarm)
-            x = one_chain(m, self._warmup_flux, self._ns, maxiter,
+            x = one_chain(m, self._warmup_flux, self._sm, self._ns, maxiter,
                           upper, lower, self._epsilon,
                           k, maxtry)
             return pd.DataFrame(x, columns=self._reactions)
@@ -180,7 +182,7 @@ class optGp(sampler):
         elif self._nproc > 1:
             pool = Pool(self._nproc)
             tasks = ((one_chain,
-                      (m, self._warmup_flux, self._ns, maxiter,
+                      (m, self._warmup_flux, self._sm, self._ns, maxiter,
                        upper, lower, self._epsilon, k, maxtry))
                      for m in np.random.choice(nwarm, self._nproc))
             x = pool.map(parallel_worker, tasks)
@@ -196,7 +198,8 @@ def parallel_worker(tasks):
     return func(*params)
 
 
-def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
+def one_chain(m, warmup_flux, sm, ns, maxiter,
+              upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
     print('Start on point %i' % m)
     x = list()
@@ -237,7 +240,7 @@ def one_chain(m, warmup_flux, ns, maxiter, upper, lower, epsilon, k, maxtry):
         s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            # if not np.allclose(self._sm.dot(xm_flux), 0, 0, epsilon):
+            # if not np.allclose(sm.dot(xm_flux), 0, 0, epsilon):
             #     # re-project point into null space
             #     xm = get_projection(xm_flux, ns, epsilon)
             #     xm_flux = ns.dot(xm)
@@ -264,7 +267,8 @@ def one_step(xm_flux, direction_flux,
     if (np.sum(xm_flux - upper > epsilon) > 0
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise OutOfBoundaryError('Point is out of boundary!')
-    index = np.abs(direction_flux) > epsilon
+    # index = np.abs(direction_flux) > epsilon
+    index = direction_flux != 0
     scale_upper = (upper
                    - xm_flux)[index] / direction_flux[index]
     scale_lower = (lower
