@@ -140,7 +140,9 @@ class sampler(object):
                                "flux limitations! Please check your model.")
         print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
-        self._warmup_flux = np.unique(self._warmup_flux, axis=0)
+        self._warmup_flux = np.unique(
+            np.round(self._warmup_flux, int(-np.log10(self._epsilon))),
+            axis=0)
         print(('Total reactions: %i\n'
                'Non-redundant warmup points: %i')
               % (len(self._reactions), len(self._warmup_flux)))
@@ -268,8 +270,10 @@ def one_step(xm_flux, direction_flux,
     scale_lower = (lower
                    - xm_flux)[index] / direction_flux[index]
     scale = np.array([scale_upper, scale_lower])
-    up = scale.max(axis=0).min()
-    down = scale.min(axis=0).max()
+    # up = scale.max(axis=0).min()
+    # down = scale.min(axis=0).max()
+    up = scale[scale > 0].min()
+    down = scale[scale <= 0].max()
     if up - down < epsilon:
         # can't move
         raise StuckError('Cannot move!')
