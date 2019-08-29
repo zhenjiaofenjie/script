@@ -240,10 +240,10 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            # if not np.allclose(sm.dot(xm_flux), 0, 0, epsilon):
-            #     # re-project point into null space
-            #     xm = get_projection(xm_flux, ns, epsilon)
-            #     xm_flux = ns.dot(xm)
+            if not np.allclose(sm.dot(xm_flux), 0, 0, epsilon):
+                # re-project point into null space
+                xm = get_projection(xm_flux, ns, epsilon)
+                xm_flux = ns.dot(xm)
             # add new point
             x.append(xm_flux)
             if (niter + 1) // k % 500 == 0:
