@@ -112,6 +112,8 @@ class sampler(object):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
         print('Setting up warmup points...')
+        # setup warmup points by maximizing and minimizing
+        # the flux of each reaction
         for i in self._reactions:
             if self._upper[i] - self._lower[i] < self._epsilon:
                 # skip fixed reaction
@@ -136,6 +138,13 @@ class sampler(object):
             except FluxBalanceError:
                 RuntimeWarning('Failed to minimize the flux of %s' % i)
                 pass
+        # add more warmup points by rondom optimizing
+        for i in range(len(self._reactions)):
+            try:
+                fluxes = self._random_optimize()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
@@ -143,7 +152,7 @@ class sampler(object):
         print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
         self._warmup_flux = np.unique(
-            np.round(self._warmup_flux, int(-np.log10(self._epsilon))),
+            np.round(self._warmup_flux, 9),
             axis=0)
         print(('Total reactions: %i\n'
                'Non-redundant warmup points: %i')
@@ -202,6 +211,8 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
               upper, lower, epsilon, k, maxtry):
     """Run one ACHR chain"""
     print('Start on point %i' % m)
+    stuckcount = 0
+    outcount = 0
     x = list()
     nwarm = len(warmup_flux)
     # prevent altering the original warmup points
@@ -220,45 +231,57 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
                 xn_flux = warmup_flux[n]
                 direction_flux = xn_flux - s
                 try:
-                    xm_flux = one_step(xm_flux, direction_flux,
-                                       upper, lower, epsilon)
+                    new_flux = one_step(xm_flux, direction_flux,
+                                        upper, lower, epsilon)
                     success = True  # successfully got the next point
                     break
                 except StuckError:
+                    stuckcount += 1
                     pass
-                except OutOfBoundaryError:
-                    pass
+                except OutOfBoundaryError as e:
+                    outcount += 1
+                    raise(e)
             if success:
                 break
             # too many failures, move xm to new position
             # set up starting point
             # pull back to avoid stuck
-            xm_flux = s
+            new_flux = s
             # xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
             # xm_flux = (xm_flux - s) * 0.9 + s
-        # recalculate the center
-        s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            if not np.allclose(sm.dot(xm_flux), 0, 0, epsilon):
+            if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
                 # re-project point into null space
-                xm = get_projection(xm_flux, ns, epsilon)
-                xm_flux = ns.dot(xm)
+                new = get_projection(new_flux, ns, epsilon, True)
+                new_flux = ns.dot(new)
+                # pull back a bit in case xm_flux is out of boundary
+                while (np.sum(new_flux - upper > epsilon) > 0
+                        or np.sum(new_flux - lower < -epsilon) > 0):
+                    new_flux = one_step(xm_flux, new_flux - xm_flux,
+                                        upper, lower, epsilon, 0.95)
             # add new point
-            x.append(xm_flux)
+            x.append(new_flux)
             if (niter + 1) // k % 500 == 0:
                 print((niter + 1) // k)
                 sys.stdout.flush()
-    print('Point %i is done...' % m)
+        xm_flux = new_flux
+        # recalculate the center
+        s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
+    print('Point %i is done... %i stucks %i out of boundary'
+          % (m, stuckcount, outcount))
     return np.array(x)
 
 
-def get_projection(x, ns, epsilon):
+def get_projection(x, ns, epsilon, check=False):
     """obtain the FBA result in null space"""
-    projection = lstsq(ns, x)
-    if projection[1] > epsilon:
-        raise RuntimeError('Failed to project point into null space!')
-    return projection[0]
+    projection = ns.T.dot(x)
+    if check:
+        if not np.allclose(ns.dot(projection), x):
+            raise RuntimeError('Failed to project point into null space!')
+        return projection
+    else:
+        return projection
 
 
 def one_step(xm_flux, direction_flux,
