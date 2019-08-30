@@ -138,13 +138,13 @@ class sampler(object):
             except FluxBalanceError:
                 RuntimeWarning('Failed to minimize the flux of %s' % i)
                 pass
-        # add more warmup points by rondom optimizing
-        for i in range(len(self._reactions)):
-            try:
-                fluxes = self._random_optimize()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                pass
+        # # add more warmup points by rondom optimizing
+        # for i in range(len(self._reactions)):
+        #     try:
+        #         fluxes = self._random_optimize()
+        #         self._warmup_flux.append(fluxes)
+        #     except FluxBalanceError:
+        #         pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
@@ -152,7 +152,7 @@ class sampler(object):
         print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
         self._warmup_flux = np.unique(
-            np.round(self._warmup_flux, 9),
+            np.round(self._warmup_flux, 10),
             axis=0)
         print(('Total reactions: %i\n'
                'Non-redundant warmup points: %i')
