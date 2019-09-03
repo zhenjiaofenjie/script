@@ -3,7 +3,7 @@ import sys
 from multiprocessing import Pool
 from collections import OrderedDict
 import pandas as pd
-from scipy.linalg import null_space, lstsq
+from scipy.linalg import null_space
 import numpy as np
 from psamm.lpsolver.cplex import Solver
 from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
@@ -76,16 +76,6 @@ class sampler(object):
             self._lower[self._objective] = (self._objective_value
                                             * self._objective_scale)
 
-    def _get_projection(self, x, check=True):
-        """obtain the FBA result in null space"""
-        if check:
-            projection = lstsq(self._ns, x)
-            if projection[1] > self._epsilon:
-                raise RuntimeError('Point violate null space!')
-        else:
-            projection = self._ns.T.dot(x)
-        return projection[0]
-
     def _random_optimize(self):
         # new optimize project
         optimize = dict()
@@ -151,9 +141,11 @@ class sampler(object):
                                "flux limitations! Please check your model.")
         print('Warmup points: %i' % len(self._warmup_flux))
         # maintain unrelated warmup points only
-        self._warmup_flux = np.unique(
-            np.round(self._warmup_flux, 10),
-            axis=0)
+        u, indices = np.unique(
+            np.round(self._warmup_flux, int(-np.log10(self._epsilon))),
+            axis=0, return_index=True)
+        # maintain un-rounded fluxes to keep accuracy
+        self._warmup_flux = self._warmup_flux[sorted(indices), :]
         print(('Total reactions: %i\n'
                'Non-redundant warmup points: %i')
               % (len(self._reactions), len(self._warmup_flux)))
@@ -212,7 +204,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     """Run one ACHR chain"""
     print('Start on point %i' % m)
     stuckcount = 0
-    outcount = 0
+    violatecount = 0
     x = list()
     nwarm = len(warmup_flux)
     # prevent altering the original warmup points
@@ -239,7 +231,6 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
                     stuckcount += 1
                     pass
                 except OutOfBoundaryError as e:
-                    outcount += 1
                     raise(e)
             if success:
                 break
@@ -252,6 +243,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         # output only one point every k iter
         if (niter + 1) % k == 0:
             if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
+                violatecount += 1
                 # re-project point into null space
                 new = get_projection(new_flux, ns, epsilon, True)
                 new_flux = ns.dot(new)
@@ -268,8 +260,8 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         xm_flux = new_flux
         # recalculate the center
         s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
-    print('Point %i is done... %i stucks %i out of boundary'
-          % (m, stuckcount, outcount))
+    print('Point %i is done... %i stucks %i reprojected into null space'
+          % (m, stuckcount, violatecount))
     return np.array(x)
 
 
@@ -277,7 +269,7 @@ def get_projection(x, ns, epsilon, check=False):
     """obtain the FBA result in null space"""
     projection = ns.T.dot(x)
     if check:
-        if not np.allclose(ns.dot(projection), x):
+        if np.linalg.norm(ns.dot(projection) - x, ord=2) ** 2 > epsilon:
             raise RuntimeError('Failed to project point into null space!')
         return projection
     else:
@@ -290,17 +282,15 @@ def one_step(xm_flux, direction_flux,
     if (np.sum(xm_flux - upper > epsilon) > 0
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise OutOfBoundaryError('Point is out of boundary!')
-    # index = np.abs(direction_flux) > epsilon
-    index = direction_flux != 0
+    index = np.abs(direction_flux) > epsilon
+    # index = direction_flux != 0
     scale_upper = (upper
                    - xm_flux)[index] / direction_flux[index]
     scale_lower = (lower
                    - xm_flux)[index] / direction_flux[index]
     scale = np.array([scale_upper, scale_lower])
-    # up = scale.max(axis=0).min()
-    # down = scale.min(axis=0).max()
-    up = scale[scale > 0].min()
-    down = scale[scale <= 0].max()
+    up = scale.max(axis=0).min()
+    down = scale.min(axis=0).max()
     if up - down < epsilon:
         # can't move
         raise StuckError('Cannot move!')
@@ -335,11 +325,19 @@ class ACHR(sampler):
             xn_flux = points_flux[n]
             direction_flux = xn_flux - s
             try:
-                xm_flux = one_step(xm_flux, direction_flux,
-                                   upper, lower, self._epsilon)
-                # # reproject
-                # xm = self._ns.T.dot(xm_flux)
-                # xm_flux = self._ns.dot(xm)
+                new_flux = one_step(xm_flux, direction_flux,
+                                    upper, lower, self._epsilon)
+                if not np.allclose(self._sm.dot(new_flux),
+                                   0, 0, self._epsilon):
+                    # re-project point into null space
+                    new = get_projection(
+                        new_flux, self._ns, self._epsilon, True)
+                    new_flux = self._ns.dot(new)
+                    # pull back a bit in case xm_flux is out of boundary
+                    while (np.sum(new_flux - upper > self._epsilon) > 0
+                            or np.sum(new_flux - lower < -self._epsilon) > 0):
+                        new_flux = one_step(xm_flux, new_flux - xm_flux,
+                                            upper, lower, self._epsilon, 0.95)
                 points_flux.append(xm_flux)
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
