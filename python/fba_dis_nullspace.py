@@ -204,7 +204,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     """Run one ACHR chain"""
     print('Start on point %i' % m)
     stuckcount = 0
-    violatecount = 0
+    reprojectcount = 0
     x = list()
     nwarm = len(warmup_flux)
     # prevent altering the original warmup points
@@ -243,7 +243,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         # output only one point every k iter
         if (niter + 1) % k == 0:
             if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
-                violatecount += 1
+                reprojectcount += 1
                 # re-project point into null space
                 new = get_projection(new_flux, ns, epsilon, True)
                 new_flux = ns.dot(new)
@@ -261,7 +261,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         # recalculate the center
         s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
     print('Point %i is done... %i stucks %i reprojected into null space'
-          % (m, stuckcount, violatecount))
+          % (m, stuckcount, reprojectcount))
     return np.array(x)
 
 
@@ -283,6 +283,8 @@ def one_step(xm_flux, direction_flux,
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise OutOfBoundaryError('Point is out of boundary!')
     index = np.abs(direction_flux) > epsilon
+    if np.sum(index) == 0:
+        raise StuckError('Direction fluxes are smaller than epsillon')
     # index = direction_flux != 0
     scale_upper = (upper
                    - xm_flux)[index] / direction_flux[index]
@@ -320,15 +322,20 @@ class ACHR(sampler):
         xm_flux = s
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
+        stuckcount = 0
+        reprojectcount = 0
         while npoint - nwarm < nsample:
             n = np.random.choice(npoint)
             xn_flux = points_flux[n]
             direction_flux = xn_flux - s
+            if np.sum(np.abs(direction_flux) > self._epsilon) == 0:
+                continue
             try:
                 new_flux = one_step(xm_flux, direction_flux,
                                     upper, lower, self._epsilon)
                 if not np.allclose(self._sm.dot(new_flux),
                                    0, 0, self._epsilon):
+                    reprojectcount += 1
                     # re-project point into null space
                     new = get_projection(
                         new_flux, self._ns, self._epsilon, True)
@@ -338,6 +345,7 @@ class ACHR(sampler):
                             or np.sum(new_flux - lower < -self._epsilon) > 0):
                         new_flux = one_step(xm_flux, new_flux - xm_flux,
                                             upper, lower, self._epsilon, 0.95)
+                xm_flux = new_flux
                 points_flux.append(xm_flux)
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
@@ -346,14 +354,16 @@ class ACHR(sampler):
                     print('%i/%i' % (npoint - nwarm, nsample))
                     sys.stdout.flush()
             except StuckError:
+                stuckcount += 1
                 # pull back a bit
                 # xm_flux = one_step(s, xm_flux - s, upper, lower,
                 #                    self._epsilon, 0.9)
                 # xm_flux = (xm_flux - s) * 0.9 + s
                 xm_flux = s
                 pass
-            except OutOfBoundaryError:
-                xm_flux = s
+        print('Done, %i stuck, %i projected into null space'
+              % (stuckcount, reprojectcount))
+        sys.stdout.flush()
         return pd.DataFrame(points_flux[nwarm:],
                             columns=self._reactions)
 
