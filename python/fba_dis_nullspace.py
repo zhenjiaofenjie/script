@@ -401,8 +401,8 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--nproc', type=int, default=1,
                         help=('number of processes, only works '
                               'for optGp method (default: 1)'))
-    parser.add_argument('-e', '--epsilon', type=float, default=1e-9,
-                        help=('precision of sampling, (default: 1e-9)'))
+    parser.add_argument('-e', '--epsilon', type=float, default=1e-6,
+                        help=('precision of sampling, (default: 1e-6)'))
     parser.add_argument('--seed', type=np.int32,
                         help='random seed for sampling')
     args = parser.parse_args()
