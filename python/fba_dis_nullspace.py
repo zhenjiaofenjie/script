@@ -165,7 +165,7 @@ class optGp(sampler):
     def __init__(self, *args, **kwargs):
         super(optGp, self).__init__(*args, **kwargs)
 
-    def sample(self, nsample, k=100, maxtry=1):
+    def sample(self, nsample, k=100, maxtry=1, seed=None):
         """Artificial Centering Hit-and-Run function"""
         print('Doing artificial centering hit-and-run')
         # number of warmup points
@@ -173,6 +173,8 @@ class optGp(sampler):
         maxiter = nsample * k // self._nproc + 1
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
+        # set up random seed
+        np.random.seed(seed)
         if self._nproc == 1:
             m = np.random.choice(nwarm)
             x = one_chain(m, self._warmup_flux, self._sm, self._ns, maxiter,
@@ -310,7 +312,7 @@ class ACHR(sampler):
     def __init__(self, *args, **kwargs):
         super(ACHR, self).__init__(*args, **kwargs)
 
-    def sample(self, nsample):
+    def sample(self, nsample, seed=None):
         """Artificial Centering Hit-and-Run functioin"""
         print('Doing artificial centering hit-and-run')
         points_flux = [row for row in self._warmup_flux]
@@ -324,6 +326,8 @@ class ACHR(sampler):
         lower = np.array([i for i in self._lower.values()])
         stuckcount = 0
         reprojectcount = 0
+        # set random seed
+        np.random.seed(seed)
         while npoint - nwarm < nsample:
             n = np.random.choice(npoint)
             xn_flux = points_flux[n]
@@ -375,7 +379,7 @@ if __name__ == "__main__":
             'Artificial Centering Hit-and-Run algorithm.'
         )
     )
-    parser.add_argument('--model', help='path to metabolic model',
+    parser.add_argument('-i', '--model', help='path to metabolic model',
                         required=True)
     parser.add_argument('-s', '--samples', type=int, default=10000,
                         help='number of samples to get (default: 10000)')
@@ -399,6 +403,8 @@ if __name__ == "__main__":
                               'for optGp method (default: 1)'))
     parser.add_argument('-e', '--epsilon', type=float, default=1e-9,
                         help=('precision of sampling, (default: 1e-9)'))
+    parser.add_argument('--seed', type=np.int32,
+                        help='random seed for sampling')
     args = parser.parse_args()
 
     model = ModelReader.reader_from_path(args.model)
@@ -421,7 +427,7 @@ if __name__ == "__main__":
         raise RuntimeError('Bad choice of sampler!')
 
     s.set_warmup()
-    result = s.sample(args.samples)
+    result = s.sample(args.samples, args.seed)
     b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
         dot = s._sm.dot(row)
