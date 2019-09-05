@@ -84,7 +84,7 @@ class sampler(object):
             # skip fixed reaction
             if limit_range < self._epsilon:
                 continue
-            # randomly set optimize weight
+        # randomly set optimize weight
             optimize[i] = 2 * np.random.sample() - 1.0
         self._p.maximize(optimize)
         xm_flux = self._get_fluxes()
@@ -172,7 +172,8 @@ class optGp(sampler):
         print('Doing artificial centering hit-and-run')
         # number of warmup points
         nwarm = len(self._warmup_flux)
-        maxiter = nsample * k // self._nproc + 1
+        maxiter = nsample // self._nproc
+        residual = nsample % self._nproc
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
         # set up random seed
@@ -186,10 +187,12 @@ class optGp(sampler):
 
         elif self._nproc > 1:
             pool = Pool(self._nproc)
-            tasks = ((one_chain,
-                      (m, self._warmup_flux, self._sm, self._ns, maxiter,
-                       upper, lower, self._epsilon, k, maxtry, seed))
-                     for m in np.random.choice(nwarm, self._nproc))
+            start_points = np.random.choice(nwarm, self._nproc)
+            tasks = task_generator(
+                one_chain, start_points, self.warmup_flux, self._sm, self._ns,
+                maxiter, upper, lower, self._epsilon, k, maxtry, seed,
+                self._nproc, residual
+            )
             x = pool.map(parallel_worker, tasks)
             pool.close()
             pool.join()
@@ -218,7 +221,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     # set up starting point
     # pull back a bit to avoid stuck
     xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.95)
-    for niter in range(maxiter):
+    for niter in range(maxiter * k):
         success = False
         # wait until a successful move
         while True:
@@ -246,16 +249,16 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
             # xm_flux = (xm_flux - s) * 0.9 + s
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
-                reprojectcount += 1
-                # re-project point into null space
-                new = get_projection(new_flux, ns, epsilon, True)
-                new_flux = ns.dot(new)
-                # pull back a bit in case xm_flux is out of boundary
-                while (np.sum(new_flux - upper > epsilon) > 0
-                        or np.sum(new_flux - lower < -epsilon) > 0):
-                    new_flux = one_step(xm_flux, new_flux - xm_flux,
-                                        upper, lower, epsilon, 0.95)
+            # if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
+            #     reprojectcount += 1
+            #     # re-project point into null space
+            #     new = get_projection(new_flux, ns, epsilon, True)
+            #     new_flux = ns.dot(new)
+            #     # pull back a bit in case xm_flux is out of boundary
+            #     while (np.sum(new_flux - upper > epsilon) > 0
+            #             or np.sum(new_flux - lower < -epsilon) > 0):
+            #         new_flux = one_step(xm_flux, new_flux - xm_flux,
+            #                             upper, lower, epsilon, 0.95)
             # add new point
             x.append(new_flux)
             if (niter + 1) // k % 500 == 0:
@@ -310,6 +313,20 @@ def one_step(xm_flux, direction_flux,
     return new_flux
 
 
+def task_generator(one_chain, startpoints, warmup_flux, sm, ns, maxiter,
+                   upper, lower, epsilon, k, maxtry, seed, limit, residual):
+    for id in range(limit):
+        m = startpoints[id]
+        if id < residual:
+            yield (one_chain,
+                   (m, warmup_flux, sm, ns, maxiter + 1, upper, lower,
+                    epsilon, k, maxtry, seed))
+        else:
+            yield (one_chain,
+                   (m, warmup_flux, sm, ns, maxiter, upper, lower,
+                    epsilon, k, maxtry, seed))
+
+
 class allWarm(sampler):
     def __init__(self, *args, **kwargs):
         super(allWarm, self).__init__(*args, **kwargs)
@@ -320,13 +337,14 @@ class allWarm(sampler):
         print('Doing artificial centering hit-and-run')
         # number of warmup points
         nwarm = len(self._warmup_flux)
-        maxiter = nsample * k // nwarm + 1
+        maxiter = nsample // nwarm
+        residual = nsample % nwarm
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
-        tasks = ((one_chain,
-                  (m, self._warmup_flux, self._sm, self._ns, maxiter,
-                   upper, lower, self._epsilon, k, maxtry, seed))
-                 for m in range(nwarm))
+        tasks = task_generator(
+            one_chain, range(nwarm), self.warmup_flux, self._sm, self._ns,
+            maxiter, upper, lower, self._epsilon, k, maxtry, seed, nwarm,
+            residual)
         if self._nproc == 1:
             x = map(parallel_worker, tasks)
         elif self._nproc > 1:
@@ -368,18 +386,18 @@ class ACHR(sampler):
             try:
                 new_flux = one_step(xm_flux, direction_flux,
                                     upper, lower, self._epsilon)
-                if not np.allclose(self._sm.dot(new_flux),
-                                   0, 0, self._epsilon):
-                    reprojectcount += 1
-                    # re-project point into null space
-                    new = get_projection(
-                        new_flux, self._ns, self._epsilon, True)
-                    new_flux = self._ns.dot(new)
-                    # pull back a bit in case xm_flux is out of boundary
-                    while (np.sum(new_flux - upper > self._epsilon) > 0
-                            or np.sum(new_flux - lower < -self._epsilon) > 0):
-                        new_flux = one_step(xm_flux, new_flux - xm_flux,
-                                            upper, lower, self._epsilon, 0.95)
+                # if not np.allclose(self._sm.dot(new_flux),
+                #                    0, 0, self._epsilon):
+                #     reprojectcount += 1
+                #     # re-project point into null space
+                #     new = get_projection(
+                #         new_flux, self._ns, self._epsilon, True)
+                #     new_flux = self._ns.dot(new)
+                #     # pull back a bit in case xm_flux is out of boundary
+                #     while (np.sum(new_flux - upper > self._epsilon) > 0
+                #             or np.sum(new_flux - lower < -self._epsilon) > 0):
+                #         new_flux = one_step(xm_flux, new_flux - xm_flux,
+                #                             upper, lower, self._epsilon, 0.95)
                 xm_flux = new_flux
                 points_flux.append(xm_flux)
                 # recalculate center
@@ -463,12 +481,12 @@ if __name__ == "__main__":
     else:
         raise RuntimeError('Bad choice of sampler!')
 
-    s.set_warmup()
-    result = s.sample(args.samples, seed=args.seed)
+    s.set_warmup(more=True)
+    result = s.sample(args.samples, seed=args.seed, maxtry=10)
     b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
         dot = s._sm.dot(row)
-        if not np.allclose(dot, b, 0, 1e-5):
+        if not np.allclose(dot, b, 0, 1e-6):
             print('Point %i violates equality, maximum value: %f'
                   % (index, np.max(np.abs(dot))))
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
