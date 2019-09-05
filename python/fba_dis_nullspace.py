@@ -427,7 +427,7 @@ if __name__ == "__main__":
         raise RuntimeError('Bad choice of sampler!')
 
     s.set_warmup()
-    result = s.sample(args.samples, args.seed)
+    result = s.sample(args.samples, seed=args.seed)
     b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
         dot = s._sm.dot(row)
