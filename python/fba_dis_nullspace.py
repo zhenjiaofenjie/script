@@ -77,15 +77,19 @@ class sampler(object):
                                             * self._objective_scale)
 
     def _random_optimize(self):
-        # new optimize project
-        optimize = dict()
+        flexible = list()
         for i in self._reactions:
             limit_range = self._upper[i] - self._lower[i]
             # skip fixed reaction
             if limit_range < self._epsilon:
                 continue
+            flexible.append(i)
         # randomly set optimize weight
-            optimize[i] = 2 * np.random.sample() - 1.0
+        vec = np.random.randn(len(flexible))
+        # normalize to unit sphere
+        vec /= np.linalg.norm(vec)
+        # set up optimize object
+        optimize = dict(zip(flexible, vec))
         self._p.maximize(optimize)
         xm_flux = self._get_fluxes()
         return xm_flux
