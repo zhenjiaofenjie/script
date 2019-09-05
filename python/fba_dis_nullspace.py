@@ -22,7 +22,7 @@ class OutOfBoundaryError(Exception):
 
 class sampler(object):
     def __init__(self, metabolic_model, solver, fix=None,
-                 objective=None, objective_scale=1, nproc=1, epsilon=1e-9):
+                 objective=None, objective_scale=1, nproc=1, epsilon=1e-6):
         self._model = metabolic_model
         self._solver = solver
         # the original stoichiometric matrix
@@ -98,7 +98,7 @@ class sampler(object):
         x = np.array(x)
         return x
 
-    def set_warmup(self):
+    def set_warmup(self, more=False):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
         print('Setting up warmup points...')
@@ -128,13 +128,14 @@ class sampler(object):
             except FluxBalanceError:
                 RuntimeWarning('Failed to minimize the flux of %s' % i)
                 pass
-        # add more warmup points by rondom optimizing
-        for i in range(len(self._reactions)):
-            try:
-                fluxes = self._random_optimize()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                pass
+        if more:
+            # add more warmup points by rondom optimizing
+            for i in range(len(self._reactions)):
+                try:
+                    fluxes = self._random_optimize()
+                    self._warmup_flux.append(fluxes)
+                except FluxBalanceError:
+                    pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
@@ -164,6 +165,7 @@ class sampler(object):
 class optGp(sampler):
     def __init__(self, *args, **kwargs):
         super(optGp, self).__init__(*args, **kwargs)
+        self._name = 'optGp'
 
     def sample(self, nsample, k=100, maxtry=1, seed=None):
         """Artificial Centering Hit-and-Run function"""
@@ -179,14 +181,14 @@ class optGp(sampler):
             m = np.random.choice(nwarm)
             x = one_chain(m, self._warmup_flux, self._sm, self._ns, maxiter,
                           upper, lower, self._epsilon,
-                          k, maxtry)
+                          k, maxtry, seed)
             return pd.DataFrame(x, columns=self._reactions)
 
         elif self._nproc > 1:
             pool = Pool(self._nproc)
             tasks = ((one_chain,
                       (m, self._warmup_flux, self._sm, self._ns, maxiter,
-                       upper, lower, self._epsilon, k, maxtry))
+                       upper, lower, self._epsilon, k, maxtry, seed))
                      for m in np.random.choice(nwarm, self._nproc))
             x = pool.map(parallel_worker, tasks)
             pool.close()
@@ -202,7 +204,7 @@ def parallel_worker(tasks):
 
 
 def one_chain(m, warmup_flux, sm, ns, maxiter,
-              upper, lower, epsilon, k, maxtry):
+              upper, lower, epsilon, k, maxtry, seed=None):
     """Run one ACHR chain"""
     print('Start on point %i' % m)
     stuckcount = 0
@@ -262,7 +264,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
         xm_flux = new_flux
         # recalculate the center
         s = (s * (nwarm + niter) + xm_flux) / (nwarm + niter + 1)
-    print('Point %i is done... %i stucks %i reprojected into null space'
+    print('Point %i is done... %i stucks, %i reprojected into null space'
           % (m, stuckcount, reprojectcount))
     return np.array(x)
 
@@ -308,9 +310,38 @@ def one_step(xm_flux, direction_flux,
     return new_flux
 
 
+class allWarm(sampler):
+    def __init__(self, *args, **kwargs):
+        super(allWarm, self).__init__(*args, **kwargs)
+        self._name = 'allWarm'
+
+    def sample(self, nsample, k=100, maxtry=1, seed=None):
+        """Artificial Centering Hit-and-Run function"""
+        print('Doing artificial centering hit-and-run')
+        # number of warmup points
+        nwarm = len(self._warmup_flux)
+        maxiter = nsample * k // nwarm + 1
+        upper = np.array([i for i in self._upper.values()])
+        lower = np.array([i for i in self._lower.values()])
+        tasks = ((one_chain,
+                  (m, self._warmup_flux, self._sm, self._ns, maxiter,
+                   upper, lower, self._epsilon, k, maxtry, seed))
+                 for m in range(nwarm))
+        if self._nproc == 1:
+            x = map(parallel_worker, tasks)
+        elif self._nproc > 1:
+            pool = Pool(self._nproc)
+            x = pool.map(parallel_worker, tasks)
+            pool.close()
+            pool.join()
+        return pd.DataFrame(np.vstack(x),
+                            columns=self._reactions)
+
+
 class ACHR(sampler):
     def __init__(self, *args, **kwargs):
         super(ACHR, self).__init__(*args, **kwargs)
+        self._name = 'ACHR'
 
     def sample(self, nsample, seed=None):
         """Artificial Centering Hit-and-Run functioin"""
@@ -397,7 +428,8 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', required=True,
                         help='output file name')
     parser.add_argument('--sampler', default='optgp',
-                        help='sampler, choices: [optGp (default), ACHR]')
+                        help=('sampler, choices: '
+                              '[optGp (default), allWarm, ACHR]'))
     parser.add_argument('-n', '--nproc', type=int, default=1,
                         help=('number of processes, only works '
                               'for optGp method (default: 1)'))
@@ -419,6 +451,11 @@ if __name__ == "__main__":
         s = optGp(mm, Solver(), fix=args.fix, objective=args.objective,
                   objective_scale=args.threshold, nproc=args.nproc,
                   epsilon=args.epsilon)
+    elif args.sampler.lower() == 'allwarm':
+        args.sampler = 'allWarm'
+        s = allWarm(mm, Solver(), fix=args.fix, objective=args.objective,
+                    objective_scale=args.threshold, nproc=args.nproc,
+                    epsilon=args.epsilon)
     elif args.sampler.lower() == 'achr':
         args.sampler = 'ACHR'
         s = ACHR(mm, Solver(), fix=args.fix, objective=args.objective,
