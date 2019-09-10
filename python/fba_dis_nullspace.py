@@ -224,7 +224,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     s = warmup_flux.mean(axis=0)
     # set up starting point
     # pull back a bit to avoid stuck
-    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.95)
+    xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.9)
     for niter in range(maxiter * k):
         success = False
         # wait until a successful move
@@ -249,8 +249,6 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
             # set up starting point
             # pull back to avoid stuck
             new_flux = s
-            # xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
-            # xm_flux = (xm_flux - s) * 0.9 + s
         # output only one point every k iter
         if (niter + 1) % k == 0:
             # if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
@@ -287,20 +285,28 @@ def get_projection(x, ns, epsilon, check=False):
         return projection
 
 
+def get_scale(limit, xm, direction, epsilon):
+    index = np.abs(direction) > epsilon**2
+    if np.sum(index) == 0:
+        raise StuckError('Direction fluxes are all zeros')
+    result = limit - xm
+    # set scale to 0 if it's close to limit boundary
+    result[np.abs(result) <= epsilon] = 0
+    return result[index] / direction[index]
+
+
 def one_step(xm_flux, direction_flux,
              upper, lower, epsilon, step=None):
     """Move one step further on one chain"""
+    # Make sure direction is a unit vector
+    direction_flux /= np.linalg.norm(direction_flux)
     if (np.sum(xm_flux - upper > epsilon) > 0
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise OutOfBoundaryError('Point is out of boundary!')
-    index = np.abs(direction_flux) > epsilon
-    if np.sum(index) == 0:
-        raise StuckError('Direction fluxes are smaller than epsillon')
-    # index = direction_flux != 0
-    scale_upper = (upper
-                   - xm_flux)[index] / direction_flux[index]
-    scale_lower = (lower
-                   - xm_flux)[index] / direction_flux[index]
+    scale_upper = get_scale(upper, xm_flux,
+                            direction_flux, epsilon)
+    scale_lower = get_scale(lower, xm_flux,
+                            direction_flux, epsilon)
     scale = np.array([scale_upper, scale_lower])
     up = scale.max(axis=0).min()
     down = scale.min(axis=0).max()
