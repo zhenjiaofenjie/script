@@ -371,7 +371,7 @@ class ACHR(sampler):
         super(ACHR, self).__init__(*args, **kwargs)
         self._name = 'ACHR'
 
-    def sample(self, nsample, seed=None):
+    def sample(self, nsample, seed=None, maxtry=1):
         """Artificial Centering Hit-and-Run functioin"""
         print('Doing artificial centering hit-and-run')
         points_flux = [row for row in self._warmup_flux]
