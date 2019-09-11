@@ -227,6 +227,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     xm_flux = one_step(s, warmup_flux[m] - s, upper, lower, epsilon, 0.9)
     for niter in range(maxiter * k):
         success = False
+        pullback = False
         # wait until a successful move
         while True:
             for ntry in range(maxtry):
@@ -248,7 +249,13 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
             # too many failures, move xm to new position
             # set up starting point
             # pull back to avoid stuck
+            if pullback:
+                # already pulled back to s before, totally stuck
+                raise StuckError(('Totally stuck, consider checking the model '
+                                  'or increase maxtry, start point %i, '
+                                  'current iteration %i') % (m, niter))
             new_flux = s
+            pullback = True
         # output only one point every k iter
         if (niter + 1) % k == 0:
             # if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
@@ -492,6 +499,9 @@ if __name__ == "__main__":
         raise RuntimeError('Bad choice of sampler!')
 
     s.set_warmup(more=True)
+    # output warmup points
+    warmup = pd.DataFrame(s.warmup_flux, columns=s._reactions)
+    warmup.to_csv('_'.join([args.output, args.sampler, 'warmup.csv']))
     result = s.sample(args.samples, seed=args.seed, maxtry=10)
     b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
