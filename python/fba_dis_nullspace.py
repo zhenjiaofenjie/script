@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.linalg import null_space
 import numpy as np
 from psamm.lpsolver.cplex import Solver
-from psamm.fluxanalysis import FluxBalanceProblem
+from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
 from psamm.datasource.native import ModelReader
 
 
@@ -119,31 +119,28 @@ class sampler(object):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
         print('Setting up warmup points...')
-        # run FBA to get a feasible origin point
-        origin_flux = np.array(
-            [self._random_optimize() for i in range(10)]).mean(axis=0)
-        # go from origin point to one dimension in the null space
-        upper = np.array([i for i in self._upper.values()])
-        lower = np.array([i for i in self._lower.values()])
-        for j in range(self._ns.shape[1]):
-            direction = np.zeros(self._ns.shape[1])
-            direction[j] = 1
-            direction_flux = self._ns.dot(direction)
-            try:
-                # forward direction
-                self._warmup_flux.append(
-                    one_step(origin_flux, direction_flux,
-                             upper, lower, self._epsilon, 1)
-                )
-            except StuckError:
+        # setup warmup points by maximizing and minimizing
+        # the flux of each reaction
+        for i in self._reactions:
+            if self._upper[i] - self._lower[i] < self._epsilon:
+                # skip fixed reaction
+                continue
+            # maximize positive flux
+            try:  # maximize the flux of reaction i
+                self._p.maximize(i)
+                # store warmup point
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                RuntimeWarning('Failed to maximize the flux of %s' % i)
                 pass
             try:
-                # reverse direction
-                self._warmup_flux.append(
-                    one_step(origin_flux, direction_flux,
-                             upper, lower, self._epsilon, 1)
-                )
-            except StuckError:
+                self._p.maximize({i: -1})
+                # store warmup point
+                fluxes = self._get_fluxes()
+                self._warmup_flux.append(fluxes)
+            except FluxBalanceError:
+                RuntimeWarning('Failed to minimize the flux of %s' % i)
                 pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
