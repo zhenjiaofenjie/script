@@ -28,6 +28,8 @@ import timeout_decorator
 
 model = ModelReader.reader_from_path(sys.argv[1])
 nm = model.create_model()
+if len(sys.argv) == 4:
+    nm.biomass_reaction = sys.argv[3]
 mm = nm.create_metabolic_model()
 
 p = FluxBalanceProblem(mm, Solver())
