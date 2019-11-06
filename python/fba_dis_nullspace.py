@@ -78,7 +78,14 @@ class sampler(object):
             self._lower[self._objective] = (self._objective_value
                                             * self._objective_scale)
 
-    def _random_optimize(self):
+    def _random_optimize(self, both=False):
+        """Get random FBA result by setting random weight to reactions.
+
+        Args:
+            both: if set to true, two FBA result with exactly opposite
+                  weighting directions are returned.
+        """
+
         flexible = list()
         for i in self._reactions:
             limit_range = self._upper[i] - self._lower[i]
@@ -93,7 +100,13 @@ class sampler(object):
         optimize = dict(zip(flexible, vec))
         self._p.maximize(optimize)
         xm_flux = self._get_fluxes()
-        return xm_flux
+        if both:
+            optimize = dict(zip(flexible, -vec))
+            self._p.maximize(optimize)
+            reverse_flux = self._get_fluxes()
+            return [xm_flux, reverse_flux]
+        else:
+            return xm_flux
 
     def _get_fluxes(self):
         """obtain the FBA result"""
@@ -106,24 +119,32 @@ class sampler(object):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
         print('Setting up warmup points...')
+        # run FBA to get a feasible origin point
+        origin_flux = np.array(
+            [self._random_optimize() for i in range(10)]).mean(axis=0)
         # go from origin point to one dimension in the null space
-        origin_flux = np.zeros(self._ns.shape[0])
         upper = np.array([i for i in self._upper.values()])
         lower = np.array([i for i in self._lower.values()])
         for j in range(self._ns.shape[1]):
             direction = np.zeros(self._ns.shape[1])
             direction[j] = 1
             direction_flux = self._ns.dot(direction)
-            # forward direction
-            self._warmup_flux.append(
-                one_step(origin_flux, direction_flux,
-                         upper, lower, self._epsilon, 1)
-            )
-            # reverse direction
-            self._warmup_flux.append(
-                one_step(origin_flux, direction_flux,
-                         upper, lower, self._epsilon, 1)
-            )
+            try:
+                # forward direction
+                self._warmup_flux.append(
+                    one_step(origin_flux, direction_flux,
+                             upper, lower, self._epsilon, 1)
+                )
+            except StuckError:
+                pass
+            try:
+                # reverse direction
+                self._warmup_flux.append(
+                    one_step(origin_flux, direction_flux,
+                             upper, lower, self._epsilon, 1)
+                )
+            except StuckError:
+                pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
