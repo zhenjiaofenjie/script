@@ -21,6 +21,8 @@ class OutOfBoundaryError(Exception):
 
 
 class sampler(object):
+    """The basic class for flux sampling."""
+
     def __init__(self, metabolic_model, solver, fix=None,
                  objective=None, objective_scale=1, nproc=1, epsilon=1e-6):
         self._model = metabolic_model
@@ -81,9 +83,8 @@ class sampler(object):
         for i in self._reactions:
             limit_range = self._upper[i] - self._lower[i]
             # skip fixed reaction
-            if limit_range < self._epsilon:
-                continue
-            flexible.append(i)
+            if limit_range >= self._epsilon:
+                flexible.append(i)
         # randomly set optimize weight
         vec = np.random.randn(len(flexible))
         # normalize to unit sphere
@@ -96,11 +97,10 @@ class sampler(object):
 
     def _get_fluxes(self):
         """obtain the FBA result"""
-        x = list()
-        for rxn in self._reactions:
-            x.append(self._p.get_flux(rxn))
-        x = np.array(x)
-        return x
+        return np.fromiter(
+            (self._p.get_flux(rxn) for rxn in self._reactions),
+            float
+        )
 
     def set_warmup(self, more=False):
         """Set up warmup points for Monte Carlo sampling."""
@@ -115,8 +115,7 @@ class sampler(object):
             # maximize positive flux
             try:  # maximize the flux of reaction i
                 self._p.maximize(i)
-                # self._p.max_min_l1(i)
-                # store warmup points based on non-zero reacions only
+                # store warmup point
                 fluxes = self._get_fluxes()
                 self._warmup_flux.append(fluxes)
             except FluxBalanceError:
@@ -125,8 +124,7 @@ class sampler(object):
             # maximize flux of reaction i in reverse direction
             try:
                 self._p.maximize({i: -1})
-                # self._p.max_min_l1({i: -1})
-                # store warmup points based on effective reacions only
+                # store warmup point
                 fluxes = self._get_fluxes()
                 self._warmup_flux.append(fluxes)
             except FluxBalanceError:
@@ -167,6 +165,8 @@ class sampler(object):
 
 
 class optGp(sampler):
+    """Sampling with optGp algorithm."""
+
     def __init__(self, *args, **kwargs):
         super(optGp, self).__init__(*args, **kwargs)
         self._name = 'optGp'
@@ -293,7 +293,8 @@ def get_projection(x, ns, epsilon, check=False):
 
 
 def get_scale(limit, xm, direction, epsilon):
-    index = np.abs(direction) > epsilon**2
+    """Get the scale based on (limit - xm) / direction."""
+    index = np.nonzero(direction)
     if np.sum(index) == 0:
         raise StuckError('Direction fluxes are all zeros')
     result = limit - xm
@@ -317,14 +318,18 @@ def one_step(xm_flux, direction_flux,
     scale = np.array([scale_upper, scale_lower])
     up = scale.max(axis=0).min()
     down = scale.min(axis=0).max()
-    if up - down < epsilon:
+    if np.max(np.abs((up - down) * direction_flux)) < epsilon:
         # can't move
         raise StuckError('Cannot move!')
     # get the new point
     if step is None:
         step = np.random.uniform(down, up)
-    else:
-        step = down + step * (up - down)
+    elif step >= 0:  # step towards the direction
+        step *= up
+    else:  # step towards the reverse direction
+        # both step and down are negative, add one more negative sign to make
+        # the final result negative
+        step *= -down
     new_flux = xm_flux + step * direction_flux
     # got acceptable result
     return new_flux
