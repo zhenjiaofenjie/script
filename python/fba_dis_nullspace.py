@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.linalg import null_space
 import numpy as np
 from psamm.lpsolver.cplex import Solver
-from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
+from psamm.fluxanalysis import FluxBalanceProblem
 from psamm.datasource.native import ModelReader
 
 
@@ -106,38 +106,24 @@ class sampler(object):
         """Set up warmup points for Monte Carlo sampling."""
         self._warmup_flux = list()
         print('Setting up warmup points...')
-        # setup warmup points by maximizing and minimizing
-        # the flux of each reaction
-        for i in self._reactions:
-            if self._upper[i] - self._lower[i] < self._epsilon:
-                # skip fixed reaction
-                continue
-            # maximize positive flux
-            try:  # maximize the flux of reaction i
-                self._p.maximize(i)
-                # store warmup point
-                fluxes = self._get_fluxes()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                RuntimeWarning('Failed to maximize the flux of %s' % i)
-                pass
-            # maximize flux of reaction i in reverse direction
-            try:
-                self._p.maximize({i: -1})
-                # store warmup point
-                fluxes = self._get_fluxes()
-                self._warmup_flux.append(fluxes)
-            except FluxBalanceError:
-                RuntimeWarning('Failed to minimize the flux of %s' % i)
-                pass
-        if more:
-            # add more warmup points by rondom optimizing
-            for i in range(len(self._reactions)):
-                try:
-                    fluxes = self._random_optimize()
-                    self._warmup_flux.append(fluxes)
-                except FluxBalanceError:
-                    pass
+        # go from origin point to one dimension in the null space
+        origin_flux = np.zeros(self._ns.shape[0])
+        upper = np.array([i for i in self._upper.values()])
+        lower = np.array([i for i in self._lower.values()])
+        for j in range(self._ns.shape[1]):
+            direction = np.zeros(self._ns.shape[1])
+            direction[j] = 1
+            direction_flux = self._ns.dot(direction)
+            # forward direction
+            self._warmup_flux.append(
+                one_step(origin_flux, direction_flux,
+                         upper, lower, self._epsilon, 1)
+            )
+            # reverse direction
+            self._warmup_flux.append(
+                one_step(origin_flux, direction_flux,
+                         upper, lower, self._epsilon, 1)
+            )
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
