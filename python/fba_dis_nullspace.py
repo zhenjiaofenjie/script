@@ -224,6 +224,8 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
     nwarm = len(warmup_flux)
     # prevent altering the original warmup points
     warmup_flux = np.copy(warmup_flux)
+    # force very small value to zero
+    warmup_flux[np.abs(warmup_flux) < epsilon] = 0
     # get the center point
     s = warmup_flux.mean(axis=0)
     # set up starting point
@@ -247,6 +249,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
                     stuckcount += 1
                     pass
                 except OutOfBoundaryError as e:
+                    print(niter)
                     raise(e)
             if success:
                 break
@@ -296,14 +299,13 @@ def get_projection(x, ns, epsilon, check=False):
         return projection
 
 
-def get_scale(limit, xm, direction, epsilon):
-    """Get the scale based on (limit - xm) / direction."""
+def get_scale(larger, smaller, direction, epsilon):
+    """Get the scale based on (larger - smaller) / direction."""
     index = np.nonzero(direction)
     if np.sum(index) == 0:
         raise StuckError('Direction fluxes are all zeros')
-    result = limit - xm
-    # set scale to 0 if it's close to limit boundary
-    result[np.abs(result) <= epsilon] = 0
+    result = larger - smaller
+    # result[np.all([result < 0, direction > 0], axis=0)] = 0
     return result[index] / direction[index]
 
 
@@ -317,11 +319,13 @@ def one_step(xm_flux, direction_flux,
         raise OutOfBoundaryError('Point is out of boundary!')
     scale_upper = get_scale(upper, xm_flux,
                             direction_flux, epsilon)
-    scale_lower = get_scale(lower, xm_flux,
-                            direction_flux, epsilon)
+    scale_lower = get_scale(xm_flux, lower,
+                            -direction_flux, epsilon)
     scale = np.array([scale_upper, scale_lower])
     up = scale.max(axis=0).min()
+    # up = scale[scale > 0].min()
     down = scale.min(axis=0).max()
+    # down = scale[scale < 0].max()
     if np.max(np.abs((up - down) * direction_flux)) < epsilon:
         # can't move
         raise StuckError('Cannot move!')
@@ -481,6 +485,8 @@ if __name__ == "__main__":
                         help=('precision of sampling, (default: 1e-6)'))
     parser.add_argument('--seed', type=np.int32,
                         help='random seed for sampling')
+    parser.add_argument('--warmup',
+                        help='use previously calculated warmup.csv file')
     args = parser.parse_args()
 
     model = ModelReader.reader_from_path(args.model)
@@ -507,15 +513,19 @@ if __name__ == "__main__":
     else:
         raise RuntimeError('Bad choice of sampler!')
 
-    s.set_warmup(more=True)
-    # output warmup points
-    warmup = pd.DataFrame(s.warmup_flux, columns=s._reactions)
-    warmup.to_csv('_'.join([args.output, args.sampler, 'warmup.csv']))
+    if args.warmup is None:
+        # build up warmup points
+        s.set_warmup(more=False)
+        # output warmup points
+        warmup = pd.DataFrame(s.warmup_flux, columns=s._reactions)
+        warmup.to_csv('_'.join([args.output, args.sampler, 'warmup.csv']))
+    else:
+        # read warmup points from file
+        s._warmup_flux = pd.read_csv(args.warmup, index_col=0).to_numpy()
     result = s.sample(args.samples, seed=args.seed, maxtry=10)
-    b = np.zeros(s._sm.shape[0])
     for index, row in result.iterrows():
         dot = s._sm.dot(row)
-        if not np.allclose(dot, b, 0, 1e-6):
+        if not np.allclose(dot, 0, 0, args.epsilon):
             print('Point %i violates equality, maximum value: %f'
                   % (index, np.max(np.abs(dot))))
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))
