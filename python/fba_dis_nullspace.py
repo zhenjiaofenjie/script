@@ -142,6 +142,14 @@ class sampler(object):
             except FluxBalanceError:
                 RuntimeWarning('Failed to minimize the flux of %s' % i)
                 pass
+        if more:
+            # add more warmup points by rondom optimizing
+            for i in range(len(self._reactions)):
+                try:
+                    fluxes = self._random_optimize()
+                    self._warmup_flux.append(fluxes)
+                except FluxBalanceError:
+                    pass
         self._warmup_flux = np.array(self._warmup_flux)
         if len(self._warmup_flux) <= 1:
             raise RuntimeError("Can't get solutions based on current "
@@ -265,16 +273,16 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
             pullback = True
         # output only one point every k iter
         if (niter + 1) % k == 0:
-            # if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
-            #     reprojectcount += 1
-            #     # re-project point into null space
-            #     new = get_projection(new_flux, ns, epsilon, True)
-            #     new_flux = ns.dot(new)
-            #     # pull back a bit in case xm_flux is out of boundary
-            #     while (np.sum(new_flux - upper > epsilon) > 0
-            #             or np.sum(new_flux - lower < -epsilon) > 0):
-            #         new_flux = one_step(xm_flux, new_flux - xm_flux,
-            #                             upper, lower, epsilon, 0.95)
+            if not np.allclose(sm.dot(new_flux), 0, 0, epsilon):
+                reprojectcount += 1
+                # re-project point into null space
+                new = get_projection(new_flux, ns, epsilon, True)
+                new_flux = ns.dot(new)
+                # pull back a bit in case xm_flux is out of boundary
+                while (np.sum(new_flux - upper > epsilon) > 0
+                        or np.sum(new_flux - lower < -epsilon) > 0):
+                    new_flux = one_step(s, new_flux - s,
+                                        upper, lower, epsilon, 0.95)
             # add new point
             x.append(new_flux)
             if (niter + 1) // k % 500 == 0:
@@ -407,6 +415,7 @@ class ACHR(sampler):
         reprojectcount = 0
         # set random seed
         np.random.seed(seed)
+        ntry = 0
         while npoint - nwarm < nsample:
             n = np.random.choice(npoint)
             xn_flux = points_flux[n]
@@ -416,35 +425,40 @@ class ACHR(sampler):
             try:
                 new_flux = one_step(xm_flux, direction_flux,
                                     upper, lower, self._epsilon)
-                # if not np.allclose(self._sm.dot(new_flux),
-                #                    0, 0, self._epsilon):
-                #     reprojectcount += 1
-                #     # re-project point into null space
-                #     new = get_projection(
-                #         new_flux, self._ns, self._epsilon, True)
-                #     new_flux = self._ns.dot(new)
-                #     # pull back a bit in case xm_flux is out of boundary
-                #     while (np.sum(new_flux - upper > self._epsilon) > 0
-                #             or np.sum(new_flux - lower < -self._epsilon) > 0):
-                #         new_flux = one_step(xm_flux, new_flux - xm_flux,
-                #                             upper, lower, self._epsilon, 0.95)
+                if not np.allclose(self._sm.dot(new_flux),
+                                   0, 0, self._epsilon):
+                    reprojectcount += 1
+                    # re-project point into null space
+                    new = get_projection(
+                        new_flux, self._ns, self._epsilon, True)
+                    new_flux = self._ns.dot(new)
+                    # pull back a bit in case xm_flux is out of boundary
+                    while (np.sum(new_flux - upper > self._epsilon) > 0
+                            or np.sum(new_flux - lower < -self._epsilon) > 0):
+                        new_flux = one_step(s, new_flux - s,
+                                            upper, lower, self._epsilon, 0.95)
                 xm_flux = new_flux
                 points_flux.append(xm_flux)
                 # recalculate center
                 s = (s * npoint + xm_flux) / (npoint + 1)
                 npoint += 1
+                ntry = 0
                 if (npoint - nwarm) % 10000 == 0:
                     print('%i/%i' % (npoint - nwarm, nsample))
                     sys.stdout.flush()
-            except StuckError:
+            except StuckError as e:
                 stuckcount += 1
+                ntry += 1
                 # pull back a bit
                 # xm_flux = one_step(s, xm_flux - s, upper, lower,
                 #                    self._epsilon, 0.9)
                 # xm_flux = (xm_flux - s) * 0.9 + s
-                xm_flux = s
-                pass
-        print('Done, %i stuck, %i projected into null space'
+                if ntry < maxtry:
+                    xm_flux = s
+                    pass
+                else:
+                    raise e
+        print('Done, %i stuck, %i reprojected into null space'
               % (stuckcount, reprojectcount))
         sys.stdout.flush()
         return pd.DataFrame(points_flux[nwarm:],
@@ -465,9 +479,9 @@ if __name__ == "__main__":
     parser.add_argument('--objective',
                         help=('reaction to use as objective, '
                               'type "biomass" for biomass reaction'))
-    parser.add_argument('--threshold', type=float, default=1.0,
+    parser.add_argument('--threshold', type=float, default=0.999999,
                         help=('ratio of maximum objective flux to maintain '
-                              '(0.0~1.0, default: 1.0)'))
+                              '(0.0~1.0, default: 0.999999)'))
     parser.add_argument('--fix',
                         help=('id,value pairs to fix the flux of reaction '
                               'at certain value, multiple pairs can be '
