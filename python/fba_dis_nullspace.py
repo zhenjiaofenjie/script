@@ -24,7 +24,8 @@ class sampler(object):
     """The basic class for flux sampling."""
 
     def __init__(self, metabolic_model, solver, fix=None,
-                 objective=None, objective_scale=1, nproc=1, epsilon=1e-6):
+                 objective=None, objective_scale=1 - 1e-6,
+                 nproc=1, epsilon=1e-6):
         self._model = metabolic_model
         self._solver = solver
         # the original stoichiometric matrix
@@ -282,7 +283,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
                 while (np.sum(new_flux - upper > epsilon) > 0
                         or np.sum(new_flux - lower < -epsilon) > 0):
                     new_flux = one_step(s, new_flux - s,
-                                        upper, lower, epsilon, 0.95)
+                                        upper, lower, epsilon, 0.9)
             # add new point
             x.append(new_flux)
             if (niter + 1) // k % 500 == 0:
@@ -402,11 +403,14 @@ class ACHR(sampler):
     def sample(self, nsample, seed=None, maxtry=1):
         """Artificial Centering Hit-and-Run functioin"""
         print('Doing artificial centering hit-and-run')
-        points_flux = [row for row in self._warmup_flux]
+        warmup_flux = self._warmup_flux.copy()
+        # force very small value to zero
+        warmup_flux[np.abs(warmup_flux) < self._epsilon] = 0
+        points_flux = [row for row in warmup_flux]
         npoint = len(points_flux)
-        nwarm = len(self._warmup_flux)
+        nwarm = len(warmup_flux)
         # center of warmup points
-        s = self._warmup_flux.mean(axis=0)
+        s = warmup_flux.mean(axis=0)
         # starting point
         xm_flux = s
         upper = np.array([i for i in self._upper.values()])
@@ -433,10 +437,16 @@ class ACHR(sampler):
                         new_flux, self._ns, self._epsilon, True)
                     new_flux = self._ns.dot(new)
                     # pull back a bit in case xm_flux is out of boundary
-                    while (np.sum(new_flux - upper > self._epsilon) > 0
+                    if (np.sum(new_flux - upper > self._epsilon) > 0
                             or np.sum(new_flux - lower < -self._epsilon) > 0):
-                        new_flux = one_step(s, new_flux - s,
-                                            upper, lower, self._epsilon, 0.95)
+                        try:
+                            new_flux = one_step(s, new_flux - s,
+                                                upper, lower,
+                                                self._epsilon, 0.9)
+                        except StuckError:
+                            # set xm to s if can't move
+                            new_flux = s
+                            pass
                 xm_flux = new_flux
                 points_flux.append(xm_flux)
                 # recalculate center
@@ -449,10 +459,6 @@ class ACHR(sampler):
             except StuckError as e:
                 stuckcount += 1
                 ntry += 1
-                # pull back a bit
-                # xm_flux = one_step(s, xm_flux - s, upper, lower,
-                #                    self._epsilon, 0.9)
-                # xm_flux = (xm_flux - s) * 0.9 + s
                 if ntry < maxtry:
                     xm_flux = s
                     pass
