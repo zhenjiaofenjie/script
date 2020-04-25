@@ -5,7 +5,7 @@ from collections import OrderedDict
 import pandas as pd
 from scipy.linalg import null_space
 import numpy as np
-from psamm.lpsolver.cplex import Solver
+from psamm.lpsolver.generic import Solver
 from psamm.fluxanalysis import FluxBalanceProblem, FluxBalanceError
 from psamm.datasource.native import ModelReader
 
