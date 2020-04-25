@@ -270,7 +270,7 @@ def one_chain(m, warmup_flux, sm, ns, maxiter,
                 raise StuckError(('Totally stuck, consider checking the model '
                                   'or increase maxtry, start point %i, '
                                   'current iteration %i') % (m, niter))
-            new_flux = s
+            xm_flux = one_step(s, xm_flux - s, upper, lower, epsilon, 0.9)
             pullback = True
         # output only one point every k iter
         if (niter + 1) % k == 0:
@@ -308,13 +308,13 @@ def get_projection(x, ns, epsilon, check=False):
         return projection
 
 
-def get_scale(larger, smaller, direction, epsilon):
+def get_scale(larger, smaller, direction):
     """Get the scale based on (larger - smaller) / direction."""
     index = np.nonzero(direction)
     if np.sum(index) == 0:
         raise StuckError('Direction fluxes are all zeros')
     result = larger - smaller
-    # result[np.all([result < 0, direction > 0], axis=0)] = 0
+    result[result < 0] = 0
     return result[index] / direction[index]
 
 
@@ -327,9 +327,9 @@ def one_step(xm_flux, direction_flux,
             or np.sum(xm_flux - lower < -epsilon) > 0):
         raise OutOfBoundaryError('Point is out of boundary!')
     scale_upper = get_scale(upper, xm_flux,
-                            direction_flux, epsilon)
+                            direction_flux)
     scale_lower = get_scale(xm_flux, lower,
-                            -direction_flux, epsilon)
+                            -direction_flux)
     scale = np.array([scale_upper, scale_lower])
     up = scale.max(axis=0).min()
     # up = scale[scale > 0].min()
@@ -405,7 +405,7 @@ class ACHR(sampler):
         print('Doing artificial centering hit-and-run')
         warmup_flux = self._warmup_flux.copy()
         # force very small value to zero
-        warmup_flux[np.abs(warmup_flux) < self._epsilon] = 0
+        # warmup_flux[np.abs(warmup_flux) < self._epsilon] = 0
         points_flux = [row for row in warmup_flux]
         npoint = len(points_flux)
         nwarm = len(warmup_flux)
@@ -501,8 +501,8 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--nproc', type=int, default=1,
                         help=('number of processes, only works '
                               'for optGp method (default: 1)'))
-    parser.add_argument('-e', '--epsilon', type=float, default=1e-6,
-                        help=('precision of sampling, (default: 1e-6)'))
+    parser.add_argument('-e', '--epsilon', type=float, default=1e-10,
+                        help=('precision of sampling, (default: 1e-10)'))
     parser.add_argument('--seed', type=np.int32,
                         help='random seed for sampling')
     parser.add_argument('--warmup',
@@ -543,9 +543,9 @@ if __name__ == "__main__":
         # read warmup points from file
         s._warmup_flux = pd.read_csv(args.warmup, index_col=0).to_numpy()
     result = s.sample(args.samples, seed=args.seed, maxtry=10)
-    for index, row in result.iterrows():
-        dot = s._sm.dot(row)
-        if not np.allclose(dot, 0, 0, args.epsilon):
-            print('Point %i violates equality, maximum value: %f'
-                  % (index, np.max(np.abs(dot))))
+    # for index, row in result.iterrows():
+    #     dot = s._sm.dot(row)
+    #     if not np.allclose(dot, 0, 0, args.epsilon):
+    #         print('Point %i violates equality, maximum value: %f'
+    #               % (index, np.max(np.abs(dot))))
     result.to_csv('_'.join([args.output, args.sampler, 'sampling.csv']))

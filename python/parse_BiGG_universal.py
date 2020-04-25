@@ -22,7 +22,7 @@ def parse_url(id, model, type):
         url = '/'.join([apiurl, model, type, id])
     else:
         url = '/'.join([apiurl, 'models', model, type, id])
-    req = urllib.urlopen(url)
+    req = urllib.request.urlopen(url)
     return json.load(req)
 
 
